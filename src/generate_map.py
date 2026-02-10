@@ -2,7 +2,7 @@ import osmnx as ox
 import pandas as pd
 import geopandas as gpd
 
-def generate_metro_map():
+def generate_map():
     print("Log: Starting geospatial data extraction from OpenStreetMap...")
 
     # 1. Fetch Metro Vancouver Municipalities (Admin Level 8)
