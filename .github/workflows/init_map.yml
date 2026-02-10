@@ -1,0 +1,23 @@
+name: Initialize Map Data
+on: workflow_dispatch # Allows you to click a button to run it
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install osmnx geopandas pandas
+      - name: Run generator
+        run: python src/generate_map.py
+      - name: Commit map
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data/metro_vancouver_map.geojson
+          git commit -m "Log: Generate initial Metro Vancouver map"
+          git push
