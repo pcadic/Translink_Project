@@ -1,44 +1,72 @@
 import osmnx as ox
 import pandas as pd
 import geopandas as gpd
+import os
+
+# Increase timeout for stability
+ox.settings.timeout = 300
 
 def generate_map():
-    print("Log: Starting clean extraction...")
+    print("Log: Starting strict extraction for Metro Vancouver...")
     
-    # Increase timeout and use strict queries
-    ox.settings.timeout = 300
+    if not os.path.exists('data'):
+        os.makedirs('data')
 
-    # 1. Focus specifically on the Regional District
-    print("Log: Fetching Metro Vancouver Municipalities...")
-    # Using a more specific name to avoid global relations
-    metro_vanc = ox.features_from_place(
-        "Metro Vancouver Regional District, British Columbia, Canada", 
-        tags={"boundary": "administrative", "admin_level": "8"}
-    )
+    # 1. Define your exact list
+    cities = [
+        "Burnaby", "Coquitlam", "Delta", "Langley City", "Maple Ridge", 
+        "New Westminster", "North Vancouver", "Pitt Meadows", "Port Coquitlam", 
+        "Port Moody", "Richmond", "Surrey", "Vancouver", "White Rock"
+    ]
+    districts = ["District of Langley", "District of North Vancouver", "District of West Vancouver"]
+    villages = ["Anmore", "Belcarra", "Lions Bay"]
+    others = ["Bowen Island", "Tsawwassen First Nation", "University Endowment Lands"]
+
+    all_places = cities + districts + villages + others
     
-    # Filter: Keep only features where the name is NOT 'Canada' or 'United States'
-    metro_vanc = metro_vanc[metro_vanc['name'].notnull()]
-    metro_vanc = metro_vanc[['name', 'geometry']].copy()
-    metro_vanc['area_type'] = 'municipality'
+    geodf_list = []
 
-    # 2. Fetch Vancouver Neighborhoods
-    print("Log: Fetching City of Vancouver neighborhoods...")
-    van_neighborhoods = ox.features_from_place(
-        "Vancouver, British Columbia, Canada", 
-        tags={"boundary": "administrative", "admin_level": "10"}
-    )
-    van_neighborhoods = van_neighborhoods[['name', 'geometry']].copy()
-    van_neighborhoods['area_type'] = 'neighborhood'
+    for place in all_places:
+        print(f"Log: Fetching {place}...")
+        try:
+            # We search for the administrative boundary of each specific place
+            # Adding 'British Columbia, Canada' ensures we don't get a city in the USA
+            query = f"{place}, British Columbia, Canada"
+            area = ox.geocode_to_gdf(query)
+            
+            # Keep only name and geometry
+            area = area[['display_name', 'geometry']].copy()
+            area['name'] = place
+            area['area_type'] = 'municipality'
+            geodf_list.append(area)
+        except Exception as e:
+            print(f"Log Warning: Could not find {place}. Error: {e}")
 
-    # 3. Combine
-    final_map = pd.concat([metro_vanc, van_neighborhoods], ignore_index=True)
-    
-    # 4. Final Cleanup: Remove any oversized geometries (safety check)
-    # We only want stuff around Vancouver (approx Longitude -123)
-    final_map = final_map[final_map.geometry.centroid.x < -120]
+    # 2. Add Vancouver Neighborhoods (Level 10) specifically
+    print("Log: Fetching Vancouver neighborhoods (detailed)...")
+    try:
+        van_neighborhoods = ox.features_from_place(
+            "Vancouver, British Columbia, Canada", 
+            tags={"boundary": "administrative", "admin_level": "10"}
+        )
+        van_neighborhoods = van_neighborhoods[['name', 'geometry']].copy()
+        van_neighborhoods['area_type'] = 'neighborhood'
+        geodf_list.append(van_neighborhoods)
+    except Exception as e:
+        print(f"Log Warning: Could not fetch neighborhoods. Error: {e}")
 
-    final_map.to_file("data/metro_vancouver_map.geojson", driver='GeoJSON')
-    print(f"Log: Success! Exported {len(final_map)} clean features.")
+    # 3. Merge everything
+    if geodf_list:
+        final_map = pd.concat(geodf_list, ignore_index=True)
+        
+        # Ensure we are using standard GPS coordinates
+        final_map = final_map.to_crs(epsg=4326)
+        
+        # Final export
+        final_map.to_file("data/metro_vancouver_map.geojson", driver='GeoJSON')
+        print(f"Log: Success! Created map with {len(final_map)} areas.")
+    else:
+        print("Log Error: No data was collected.")
 
 if __name__ == "__main__":
     generate_map()
