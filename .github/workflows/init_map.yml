@@ -4,6 +4,8 @@ on: workflow_dispatch # Allows you to click a button to run it
 jobs:
   generate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v3
       - name: Set up Python
