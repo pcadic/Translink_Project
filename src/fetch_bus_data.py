@@ -12,12 +12,17 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def fetch_bus_gtfs():
-    # New GTFS-RT URL for Translink
     url = f"https://gtfs.translink.ca/gtfsrealtime?apikey={TRANSLINK_API_KEY}"
     
-    print("Log: Fetching GTFS-RT V3 data...")
-    response = requests.get(url)
+    # Ajoute ceci pour simuler un navigateur ou une application réelle
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/x-google-protobuf'
+    }
     
+    print("Log: Fetching GTFS-RT V3 data...")
+    response = requests.get(url, headers=headers, timeout=30)
+
     if response.status_code != 200:
         print(f"Log Error: Could not fetch GTFS data. Code: {response.status_code}")
         return
