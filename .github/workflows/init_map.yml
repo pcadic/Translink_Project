@@ -20,7 +20,16 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git pull origin main --rebase  # Récupère les changements distants et remet ton commit par-dessus
+          
+          # 1. On prépare les changements
           git add data/metro_vancouver_map.geojson
+          
+          # 2. On commit localement (même si le push échoue après)
           git commit -m "Log: Update Metro Vancouver map" || echo "No changes to commit"
+          
+          # 3. On synchronise avec le serveur en mode rebase
+          # Le rebase va mettre ton commit au-dessus des autres proprement
+          git pull --rebase origin main
+          
+          # 4. On pousse enfin
           git push origin main
