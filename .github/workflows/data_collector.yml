@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install dependencies
-        run: pip install requests geopandas shapely supabase pandas
+        run: pip install requests geopandas shapely supabase pandas google-transit-interactive gtfs-realtime-bindings protobuf
       - name: Run collector
         env:
           TRANSLINK_API_KEY: ${{ secrets.TRANSLINK_API_KEY }}
