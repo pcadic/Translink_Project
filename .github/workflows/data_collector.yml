@@ -13,9 +13,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.10' # Indispensable pour les nouvelles versions de pandas/supabase
       - name: Install dependencies
-        run: pip install requests geopandas shapely supabase pandas google-transit-interactive gtfs-realtime-bindings protobuf
+        run: |
+          pip install --upgrade pip
+          pip install requests geopandas shapely supabase pandas gtfs-realtime-bindings protobuf==4.25.1
       - name: Run collector
         env:
           TRANSLINK_API_KEY: ${{ secrets.TRANSLINK_API_KEY }}
