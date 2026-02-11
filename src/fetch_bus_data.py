@@ -17,13 +17,22 @@ def fetch_bus_data():
     url = f"https://api.translink.ca/rttiapi/v1/buses?apikey={TRANSLINK_API_KEY}"
     headers = {'Accept': 'application/json'}
     
-    response = requests.get(url, headers=headers)
-    if response.status_code != 200:
-        print(f"Log Error: API access failed with code {response.status_code}")
+    # Try up to 3 times if there is a network error
+    for attempt in range(3):
+        try:
+            print(f"Log: Fetching data (Attempt {attempt + 1})...")
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status() # Check for HTTP errors
+            buses = response.json()
+            print(f"Log: {len(buses)} buses retrieved.")
+            break # Success! Exit the loop
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            print(f"Log Warning: Connection failed. Retrying in 5s... ({e})")
+            time.sleep(5)
+    else:
+        print("Log Error: All attempts failed. Skipping this run.")
         return
     
-    buses = response.json()
-    print(f"Log: {len(buses)} buses retrieved.")
 
     # 2. Load our GeoJSON map for Spatial Join
     gdf_map = gpd.read_file('data/metro_vancouver_map.geojson')
