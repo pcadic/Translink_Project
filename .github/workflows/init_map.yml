@@ -16,10 +16,11 @@ jobs:
         run: pip install osmnx geopandas pandas
       - name: Run generator
         run: python src/generate_map.py
-      - name: Commit map
+      - name: Commit and Push map
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          git pull origin main --rebase  # Récupère les changements distants et remet ton commit par-dessus
           git add data/metro_vancouver_map.geojson
-          git commit -m "Log: Generate initial Metro Vancouver map"
-          git push
+          git commit -m "Log: Update Metro Vancouver map" || echo "No changes to commit"
+          git push origin main
