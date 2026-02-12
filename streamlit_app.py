@@ -53,3 +53,24 @@ if not df.empty:
         st.write(df)
 else:
     st.warning("Aucune donnée trouvée dans Supabase. Lancez votre script GitHub Action !")
+
+
+# --- Carte Interactive des Bus ---
+st.subheader("📍 Position des bus en temps réel")
+
+# On crée une colonne pour la couleur basée sur le retard
+# Les bus très en retard (ex: > 5 min) apparaîtront différemment si on utilisait Pydeck, 
+# mais avec st.map on affiche déjà tous les points.
+
+if not df.empty:
+    # Filtrage optionnel : ne montrer que les bus avec un certain retard
+    show_only_delayed = st.checkbox("Montrer uniquement les bus en retard (> 2 min)")
+    
+    map_data = df.copy()
+    if show_only_delayed:
+        map_data = map_data[map_data['delay_seconds'] > 120]
+
+    # Streamlit cherche automatiquement les colonnes 'latitude' et 'longitude'
+    st.map(map_data)
+else:
+    st.write("Aucune donnée géographique disponible.")
