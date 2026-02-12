@@ -49,8 +49,8 @@ if not df.empty:
     st.pyplot(fig)
 
     # --- Tableau de données ---
-    with st.expander("Voir les données brutes"):
-        st.write(df)
+    # with st.expander("Voir les données brutes"):
+    #    st.write(df)
 else:
     st.warning("Aucune donnée trouvée dans Supabase. Lancez votre script GitHub Action !")
 
