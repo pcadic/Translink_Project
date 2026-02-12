@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import seaborn as sns
 from supabase import create_client
 
-# --- CONFIGURATION DE LA PAGE ---
+# --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="TransLink Performance Dashboard", page_icon="🚌", layout="wide")
 
-# --- CONNEXION SUPABASE ---
+# --- SUPABASE CONNECTION ---
 @st.cache_resource
 def init_connection():
     url = st.secrets["SUPABASE_URL"]
@@ -16,10 +17,10 @@ def init_connection():
 
 supabase = init_connection()
 
-# --- CHARGEMENT DES DONNÉES ---
+# --- DATA LOADING ---
 @st.cache_data(ttl=300)
 def load_data():
-    # On monte la limite à 5000 pour voir tous les bus
+    # Increase limit to bypass Supabase default 1000 rows
     response = supabase.table("bus_positions").select("*").limit(5000).execute()
     df = pd.DataFrame(response.data)
     if not df.empty:
@@ -31,26 +32,24 @@ raw_df = load_data()
 
 # --- SIDEBAR ---
 st.sidebar.header("⚙️ Configuration")
-mode = st.sidebar.radio("Mode d'affichage :", ["Temps Réel (Dernier Run)", "Historique (Global)"])
+mode = st.sidebar.radio("Display Mode:", ["Real-Time (Last Run)", "Historical (Global)"])
 
 if not raw_df.empty:
-    # Choix du jeu de données selon le mode
-    if mode == "Temps Réel (Dernier Run)":
-        dernier_timestamp = raw_df['recorded_time'].max()
-        df_working = raw_df[raw_df['recorded_time'] == dernier_timestamp].copy()
+    if mode == "Real-Time (Last Run)":
+        latest_ts = raw_df['recorded_time'].max()
+        df_working = raw_df[raw_df['recorded_time'] == latest_ts].copy()
     else:
         df_working = raw_df.copy()
 
-    # Filtre de quartier
     all_areas = sorted(df_working['area_name'].unique())
-    selected_areas = st.sidebar.multiselect("Quartiers", options=all_areas, default=all_areas)
+    selected_areas = st.sidebar.multiselect("Neighborhoods", options=all_areas, default=all_areas)
     df = df_working[df_working['area_name'].isin(selected_areas)].copy()
 
-    # --- TITRE ---
+    # --- MAIN TITLE ---
     st.title(f"📊 TransLink Analytics - {mode}")
-    st.caption(f"Données basées sur {len(df)} enregistrements")
+    st.caption(f"Based on {len(df)} records")
 
-    # --- SECTION 1 : KPIs ---
+    # --- SECTION 1: KPIs ---
     col1, col2, col3, col4, col5 = st.columns(5)
     
     on_time = (df['delay_min'].between(-1, 3)).mean() * 100
@@ -62,59 +61,70 @@ if not raw_df.empty:
     area_stats = df[df['area_name'] != 'Off-Map'].groupby('area_name')['delay_min'].mean()
     worst_area = area_stats.idxmax() if not area_stats.empty else "N/A"
 
-    col1.metric("🚌 Bus", len(df))
-    col2.metric("✅ Ponctualité", f"{on_time:.1f}%")
-    col3.metric("⏳ Retard Moyen", f"{avg_delay:.2f} m")
-    col4.metric("🚩 Ligne Lente", f"L.{slowest_route}")
-    col5.metric("📍 Zone Critique", worst_area)
+    col1.metric("Active Buses", len(df))
+    col2.metric("Punctuality Rate", f"{on_time:.1f}%")
+    col3.metric("Avg Delay", f"{avg_delay:.2f} min")
+    col4.metric("Slowest Route", f"R.{slowest_route}")
+    col5.metric("Critical Zone", worst_area)
 
     st.divider()
 
-    # --- SECTION 2 : GRAPHIQUES ---
+    # --- SECTION 2: CHARTS ---
     c1, c2 = st.columns(2)
 
     with c1:
-        st.subheader("🏘️ Retard par quartier")
+        st.subheader("🏘️ Average Delay by Neighborhood")
         plot_data = area_stats.sort_values().reset_index()
         
-        # Attribution des couleurs : Vert si < 0 (avance/ponctuel), Rouge si > 0 (retard)
-        # On utilise des dégradés simples basés sur la valeur
-        colors = ['#2ecc71' if x < 0 else '#e74c3c' for x in plot_data['delay_min']]
+        # Color Gradient Logic
+        def get_color(val, min_val, max_val):
+            if val < 0: # Green Gradient for early/on-time
+                # Scale between 0 and 1 based on negative values
+                mag = val / min_val if min_val < 0 else 0
+                return mcolors.to_hex(plt.cm.Greens(0.3 + 0.6 * mag))
+            else: # Red Gradient for delays
+                mag = val / max_val if max_val > 0 else 0
+                return mcolors.to_hex(plt.cm.Reds(0.3 + 0.6 * mag))
+
+        min_d, max_d = plot_data['delay_min'].min(), plot_data['delay_min'].max()
+        bar_colors = [get_color(x, min_d, max_d) for x in plot_data['delay_min']]
         
         fig, ax = plt.subplots(figsize=(10, 7))
-        ax.barh(plot_data['area_name'], plot_data['delay_min'], color=colors)
+        ax.barh(plot_data['area_name'], plot_data['delay_min'], color=bar_colors)
         ax.axvline(0, color='black', linewidth=1.5)
-        ax.set_xlabel("Minutes (Vert = Avance | Rouge = Retard)")
+        ax.set_xlabel("Minutes (Green = Early | Red = Delayed)")
         st.pyplot(fig)
 
     with c2:
-        st.subheader("📈 Distribution des écarts")
+        st.subheader("📈 Delay Distribution")
         fig2, ax2 = plt.subplots(figsize=(10, 7))
-        # Retour au vert clair pour l'histogramme
-        sns.histplot(df['delay_min'], bins=20, kde=True, color="#90be6d", ax=ax2)
+        # Purple bars and Orange line
+        sns.histplot(df['delay_min'], bins=20, kde=True, color="#6a1b9a", ax=ax2, 
+                     line_kws={"color": "#ff9100", "lw": 3})
         ax2.axvline(0, color='red', linestyle='--')
-        ax2.set_xlabel("Minutes d'écart")
+        ax2.set_xlabel("Delay (min)")
         st.pyplot(fig2)
 
-    # --- SECTION 3 : CARTE ---
+    # --- SECTION 3: MAP ---
     st.divider()
-    st.subheader("📍 Carte des positions")
+    st.subheader("📍 Live Bus Map")
     
-    # Rétablissement du filtre de retard pour la carte
     map_filter = st.radio(
-        "Filtrer la carte :", 
-        ["Tous les bus", "Bus en retard (> 3 min)", "Bus en avance (> 1 min)"], 
+        "Map Filter:", 
+        ["All Buses", "Delayed (> 3 min)", "Early (> 1 min)"], 
         horizontal=True
     )
     
     df_map = df.sort_values('recorded_time', ascending=False).drop_duplicates('vehicle_no')
     
-    if map_filter == "Bus en retard (> 3 min)":
+    if map_filter == "Delayed (> 3 min)":
         df_map = df_map[df_map['delay_min'] > 3]
-    elif map_filter == "Bus en avance (> 1 min)":
+    elif map_filter == "Early (> 1 min)":
         df_map = df_map[df_map['delay_min'] < -1]
     
     st.map(df_map)
 
 else:
-    st.error("Aucune donnée disponible.")
+    st.error("No data available.")
+
+st.caption("Data source: TransLink Open Data • Real-time analysis with gradient mapping.")
