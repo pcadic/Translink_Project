@@ -20,53 +20,67 @@ def init_connection():
 
 supabase = init_connection()
 
-# --- CHARGEMENT DES DONNÉES ---
+# --- CHARGEMENT ET NETTOYAGE DES DONNÉES ---
 @st.cache_data(ttl=300)
-def load_data():
-    # Récupère les positions les plus récentes
+def load_and_clean_data():
+    # 1. Récupération de toute la table
     response = supabase.table("bus_positions").select("*").execute()
-    df = pd.DataFrame(response.data)
-    if not df.empty:
-        # Conversion en minutes pour plus de clarté
-        df['delay_min'] = df['delay_seconds'] / 60
-        # Conversion du timestamp en objet datetime
-        df['recorded_time'] = pd.to_datetime(df['recorded_time'])
-    return df
+    full_df = pd.DataFrame(response.data)
+    
+    if full_df.empty:
+        return full_df
 
-df_raw = load_data()
+    # 2. Préparation des types
+    full_df['recorded_time'] = pd.to_datetime(full_df['recorded_time'])
+    full_df['delay_min'] = full_df['delay_seconds'] / 60
+    
+    # 3. DÉDOUBLONNAGE : On ne garde que la position la plus récente pour chaque véhicule
+    # Cela permet d'avoir le nombre exact de bus en circulation au dernier relevé
+    df_latest = full_df.sort_values('recorded_time', ascending=False).drop_duplicates('vehicle_no')
+    
+    return df_latest
+
+# On récupère le dataframe "propre"
+df = load_and_clean_data()
 
 # --- BARRE LATÉRALE (FILTRES) ---
 st.sidebar.header("🔍 Filtres")
-if not df_raw.empty:
-    all_areas = sorted(df_raw['area_name'].unique())
+if not df.empty:
+    all_areas = sorted(df['area_name'].unique())
     selected_areas = st.sidebar.multiselect(
         "Choisir les quartiers", 
         options=all_areas, 
         default=all_areas
     )
-    
-    # Filtrage du dataframe
-    df = df_raw[df_raw['area_name'].isin(selected_areas)].copy()
+    # Application du filtre
+    df_filtered = df[df['area_name'].isin(selected_areas)].copy()
 else:
-    df = df_raw
+    df_filtered = df
 
 # --- TITRE PRINCIPAL ---
 st.title("📊 TransLink Real-Time Analytics")
-st.markdown(f"**Dernière mise à jour :** {df['recorded_time'].max() if not df.empty else 'N/A'}")
-
 if not df.empty:
-    # --- SECTION 1 : KPIs (Key Performance Indicators) ---
-    # Un bus est considéré "On Time" s'il a moins de 3 min de retard et moins de 1 min d'avance
-    on_time_count = len(df[(df['delay_min'] <= 3) & (df['delay_min'] >= -1)])
-    punctuality_rate = (on_time_count / len(df)) * 100
-    avg_delay = df['delay_min'].mean()
-    most_delayed_route = df.groupby('route_no')['delay_min'].mean().idxmax()
+    last_update = df['recorded_time'].max().strftime('%d/%m/%Y %H:%M:%S')
+    st.markdown(f"**Dernier relevé détecté :** {last_update} (UTC)")
+
+st.divider()
+
+if not df_filtered.empty:
+    # --- SECTION 1 : KPIs ---
+    # Ponctualité : écart entre -1 min (avance légère) et +3 min (retard acceptable)
+    on_time_count = len(df_filtered[(df_filtered['delay_min'] <= 3) & (df_filtered['delay_min'] >= -1)])
+    punctuality_rate = (on_time_count / len(df_filtered)) * 100
+    avg_delay = df_filtered['delay_min'].mean()
+    
+    # Identification du quartier le plus en retard
+    stats_area_kpi = df_filtered[df_filtered['area_name'] != 'Off-Map'].groupby('area_name')['delay_min'].mean()
+    worst_area = stats_area_kpi.idxmax() if not stats_area_kpi.empty else "N/A"
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("🚌 Bus Actifs", len(df))
-    col2.metric("✅ Taux de Ponctualité", f"{punctuality_rate:.1f}%", help="Retard < 3min et Avance < 1min")
+    col1.metric("🚌 Bus Actifs", len(df_filtered))
+    col2.metric("✅ Taux de Ponctualité", f"{punctuality_rate:.1f}%")
     col3.metric("⏳ Retard Moyen", f"{avg_delay:.2f} min")
-    col4.metric("🚩 Ligne la plus lente", f"Route {most_delayed_route}")
+    col4.metric("🚩 Zone Critique", worst_area)
 
     st.divider()
 
@@ -74,40 +88,55 @@ if not df.empty:
     left_col, right_col = st.columns(2)
 
     with left_col:
-        st.subheader("🏘️ Retard moyen par quartier")
-        df_area = df[df['area_name'] != 'Off-Map'].copy()
-        stats_area = df_area.groupby('area_name')['delay_min'].mean().sort_values(ascending=False).reset_index()
+        st.subheader("🏘️ Performance par quartier")
+        # Préparation des données du graphique
+        plot_data = df_filtered[df_filtered['area_name'] != 'Off-Map'].groupby('area_name')['delay_min'].mean().sort_values().reset_index()
         
-        fig_bar, ax_bar = plt.subplots(figsize=(10, 6))
-        sns.barplot(data=stats_area, x='delay_min', y='area_name', palette="RdYlGn_r", ax=ax_bar)
-        ax_bar.axvline(0, color='black', linestyle='-', linewidth=1)
-        ax_bar.set_xlabel("Minutes (Retard > 0)")
+        fig_bar, ax_bar = plt.subplots(figsize=(10, 7))
+        # Utilisation de la palette divergente 'coolwarm'
+        # Bleu = Avance | Blanc = Ponctuel | Rouge = Retard
+        sns.barplot(
+            data=plot_data, 
+            x='delay_min', 
+            y='area_name', 
+            palette="coolwarm", 
+            ax=ax_bar,
+            center=0
+        )
+        ax_bar.axvline(0, color='black', linestyle='-', linewidth=1.5)
+        ax_bar.set_xlabel("Minutes d'écart (Négatif = Avance | Positif = Retard)")
         ax_bar.set_ylabel("")
         st.pyplot(fig_bar)
 
     with right_col:
         st.subheader("📈 Distribution des écarts")
-        fig_hist, ax_hist = plt.subplots(figsize=(10, 6))
-        sns.histplot(df['delay_min'], bins=25, kde=True, color="#2e7d32", ax=ax_hist)
-        ax_hist.axvline(0, color='red', linestyle='--', label="Heure théorique")
+        fig_hist, ax_hist = plt.subplots(figsize=(10, 7))
+        sns.histplot(df_filtered['delay_min'], bins=20, kde=True, color="#4A90E2", ax=ax_hist)
+        ax_hist.axvline(0, color='red', linestyle='--', label="Théorique")
         ax_hist.set_xlabel("Minutes d'écart")
         ax_hist.set_ylabel("Nombre de bus")
         st.pyplot(fig_hist)
 
     # --- SECTION 3 : CARTE ---
     st.divider()
-    st.subheader("📍 Localisation des bus")
-    # Filtre rapide pour la carte
-    map_filter = st.radio("Afficher :", ["Tous les bus", "Bus en retard (> 3 min)"], horizontal=True)
+    st.subheader("📍 Carte des bus en circulation")
     
-    df_map = df.copy()
-    if map_filter == "Bus en retard (> 3 min)":
+    # Sélecteur de mode pour la carte
+    map_mode = st.radio(
+        "Visualiser :", 
+        ["Tous les bus", "Bus en retard (> 3 min)", "Bus en avance (> 1 min)"], 
+        horizontal=True
+    )
+    
+    df_map = df_filtered.copy()
+    if map_mode == "Bus en retard (> 3 min)":
         df_map = df_map[df_map['delay_min'] > 3]
+    elif map_mode == "Bus en avance (> 1 min)":
+        df_map = df_map[df_map['delay_min'] < -1]
     
     st.map(df_map)
 
 else:
-    st.error("⚠️ Aucune donnée disponible. Vérifiez la connexion Supabase ou lancez le pipeline.")
+    st.warning("⚠️ Aucune donnée ne correspond aux filtres sélectionnés ou la table est vide.")
 
-# --- FOOTER ---
-st.caption("Données fournies par TransLink Open API • Développé pour analyse de performance.")
+st.caption("Données TransLink Open Data • Analyse temps réel dédoublonnée.")
