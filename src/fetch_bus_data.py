@@ -65,7 +65,7 @@ def run_pipeline():
                 for item in al.informed_entity:
                     if item.route_id:
                         rid = item.route_id
-                         break
+                        break
 
              alerts.append({
                 "alert_id": entity.id,
