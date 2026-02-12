@@ -54,15 +54,28 @@ def run_pipeline():
                 last = tu.stop_time_update[-1]
                 delays[tu.trip.trip_id] = last.arrival.delay if last.HasField('arrival') else 0
         
+        # --- Extraction des Alertes (Version robuste) ---
         if entity.HasField('alert'):
             al = entity.alert
-            alerts.append({
+            
+            # On cherche le route_id s'il existe, sinon on met "NETWORK"
+            rid = "NETWORK"
+            if al.informed_entity:
+                # On prend le premier qui a un route_id
+                for item in al.informed_entity:
+                    if item.route_id:
+                        rid = item.route_id
+                         break
+
+             alerts.append({
                 "alert_id": entity.id,
-                "route_id": al.informed_entity[0].route_id if al.informed_entity else "Global",
-                "header_text": al.header_text.translation[0].text if al.header_text.translation else "",
-                "cause": str(al.cause),
+                "route_id": rid,
+                "header_text": al.header_text.translation[0].text if al.header_text.translation else "No Title",
+                 "cause": str(al.cause),
                 "start_time": pd.to_datetime(al.active_period[0].start, unit='s').isoformat() if al.active_period else None
             })
+    
+        print(f"Log Discovery: {len(alerts)} alertes prêtes pour Supabase.")
 
     # --- ÉTAPE 3 : Traitement des Positions (depuis pos_feed) ---
     bus_batch = []
