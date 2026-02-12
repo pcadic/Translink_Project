@@ -73,7 +73,7 @@ def run_pipeline():
                 "header_text": al.header_text.translation[0].text if al.header_text.translation else "No Title",
                  "cause": str(al.cause),
                 "start_time": pd.to_datetime(al.active_period[0].start, unit='s').isoformat() if al.active_period else None
-            })
+                })
     
      print(f"Log Discovery: {len(alerts)} alertes prêtes pour Supabase.")
 
