@@ -1,76 +1,25 @@
-import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from supabase import create_client
+# --- CALCULS PRÉALABLES ---
+df['delay_min'] = df['delay_seconds'] / 60
+ponctualite = (df['delay_min'] <= 3).mean() * 100
+quartier_pire = df.groupby('area_name')['delay_min'].mean().idxmax()
 
-# Configuration de la page
-st.set_page_config(page_title="Vancouver Bus Tracker", layout="wide")
+# --- SECTION 1: KPIs ---
+col1, col2, col3 = st.columns(3)
+col1.metric("Ponctualité ( < 3 min)", f"{ponctualite:.1f}%")
+col2.metric("Retard Moyen Global", f"{df['delay_min'].mean():.2f} min")
+col3.metric("Quartier le plus critique", quartier_pire)
 
-# Connexion Supabase (Utilise les secrets de Streamlit)
-@st.cache_resource
-def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+st.divider()
 
-supabase = init_connection()
+# --- SECTION 2: ANALYSE DE DISTRIBUTION ---
+st.subheader("📊 Répartition des retards")
+fig2, ax2 = plt.subplots(figsize=(10, 4))
+sns.histplot(df['delay_min'], bins=20, kde=True, color="skyblue", ax=ax2)
+ax2.set_xlabel("Minutes de retard")
+ax2.set_ylabel("Nombre de bus")
+ax2.axvline(0, color='red', linestyle='--')
+st.pyplot(fig2)
 
-st.title("🚌 Analyse du Trafic TransLink Vancouver")
-
-# Fonction pour charger les données
-@st.cache_data(ttl=300) # Rafraîchir toutes les 5 minutes
-def get_data():
-    response = supabase.table("bus_positions").select("*").execute()
-    return pd.DataFrame(response.data)
-
-df = get_data()
-
-if not df.empty:
-    # --- Métriques rapides ---
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Bus en circulation", len(df))
-    col2.metric("Retard moyen (min)", f"{round(df['delay_seconds'].mean() / 60, 2)}")
-    col3.metric("Quartiers couverts", df['area_name'].nunique())
-
-    # --- Graphique des Retards ---
-    st.subheader("Retard moyen par quartier")
-    
-    # Préparation des données
-    df_plot = df[df['area_name'] != 'Off-Map'].copy()
-    df_plot['delay_min'] = df_plot['delay_seconds'] / 60
-    stats = df_plot.groupby('area_name')['delay_min'].mean().sort_values(ascending=False).reset_index()
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.barplot(x='delay_min', y='area_name', data=stats, palette="RdYlGn_r", ax=ax)
-    ax.set_xlabel("Minutes (Positif = Retard, Négatif = Avance)")
-    ax.set_ylabel("Quartier")
-    ax.axvline(0, color='black', lw=1)
-    st.pyplot(fig)
-
-    # --- Tableau de données ---
-    # with st.expander("Voir les données brutes"):
-    #    st.write(df)
-else:
-    st.warning("Aucune donnée trouvée dans Supabase. Lancez votre script GitHub Action !")
-
-
-# --- Carte Interactive des Bus ---
-st.subheader("📍 Position des bus en temps réel")
-
-# On crée une colonne pour la couleur basée sur le retard
-# Les bus très en retard (ex: > 5 min) apparaîtront différemment si on utilisait Pydeck, 
-# mais avec st.map on affiche déjà tous les points.
-
-if not df.empty:
-    # Filtrage optionnel : ne montrer que les bus avec un certain retard
-    show_only_delayed = st.checkbox("Montrer uniquement les bus en retard (> 2 min)")
-    
-    map_data = df.copy()
-    if show_only_delayed:
-        map_data = map_data[map_data['delay_seconds'] > 120]
-
-    # Streamlit cherche automatiquement les colonnes 'latitude' et 'longitude'
-    st.map(map_data)
-else:
-    st.write("Aucune donnée géographique disponible.")
+# --- TA SECTION ACTUELLE (RETARDS PAR VILLE) ---
+st.subheader("🏘️ Retard moyen par quartier")
+# ... ton code actuel du barplot ...
