@@ -75,7 +75,7 @@ def run_pipeline():
                 "start_time": pd.to_datetime(al.active_period[0].start, unit='s').isoformat() if al.active_period else None
             })
     
-        print(f"Log Discovery: {len(alerts)} alertes prêtes pour Supabase.")
+     print(f"Log Discovery: {len(alerts)} alertes prêtes pour Supabase.")
 
     # --- ÉTAPE 3 : Traitement des Positions (depuis pos_feed) ---
     bus_batch = []
