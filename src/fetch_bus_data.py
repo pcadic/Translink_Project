@@ -49,7 +49,7 @@ def run_pipeline():
                 })
 
         # 2. GEOGRAPHIC PROCESSING
-        gdf = gpd.read_file('dat/metro_vancouver_map.geojson')
+        gdf = gpd.read_file('data/metro_vancouver_map.geojson')
         neighborhoods = gdf[gdf['area_type'] == 'neighborhood']
         municipalities = gdf[gdf['area_type'] == 'municipality']
 
