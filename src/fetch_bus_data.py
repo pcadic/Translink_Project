@@ -13,7 +13,6 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_feed(endpoint):
-    """Fetches and parses GTFS-Realtime Protobuf feeds from TransLink."""
     url = f"https://gtfsapi.translink.ca/v3/{endpoint}?apikey={TRANSLINK_API_KEY}"
     headers = {'User-Agent': 'TranslinkProject/1.0', 'Accept': 'application/x-google-protobuf'}
     response = requests.get(url, headers=headers, timeout=30)
@@ -24,80 +23,85 @@ def get_feed(endpoint):
 
 def run_pipeline():
     print("Log: Starting enhanced pipeline...")
-    
+    # Initialisation des logs pour éviter les erreurs "not defined"
+    log_data = {"status": "Starting", "bus_count": 0, "alert_count": 0}
+    alerts = [] 
+    bus_batch = []
+
     try:
-        # 1. FETCH REAL-TIME FEEDS
-        # gtfsposition: Live Lat/Long and TripIDs
-        # gtfsrealtime: Trip Updates (delays, stop sequences)
+        # 1. FETCH DATA
         pos_feed = get_feed("gtfsposition")
         rt_feed = get_feed("gtfsrealtime")
         
-        # Create a dictionary of delays by TripID for fast lookup
+        # Mapping delays
         delays = {}
         for entity in rt_feed.entity:
             if entity.HasField('trip_update'):
                 tu = entity.trip_update
-                # Get delay from the first available stop update
                 if tu.stop_time_update:
                     delays[tu.trip.trip_id] = tu.stop_time_update[0].arrival.delay
+            
+            # OPTIONNEL: Récupérer les alertes si présentes
+            if entity.HasField('alert'):
+                alerts.append({
+                    "alert_id": entity.id,
+                    "header": str(entity.alert.header_text.translation[0].text)[:255]
+                })
 
-        # 2. SPATIAL DATA PREPARATION
-        # Load GeoJSON and separate into two layers for the "Nested" search
-        gdf = gpd.read_file('data/metro_vancouver_map.geojson')
+        # 2. GEOGRAPHIC PROCESSING
+        gdf = gpd.read_file('metro_vancouver_map(1).geojson')
         neighborhoods = gdf[gdf['area_type'] == 'neighborhood']
         municipalities = gdf[gdf['area_type'] == 'municipality']
 
-        bus_batch = []
-        
-        # 3. PROCESS EACH VEHICLE
         for entity in pos_feed.entity:
             if entity.HasField('vehicle'):
                 v = entity.vehicle
                 p = Point(v.position.longitude, v.position.latitude)
                 
-                # --- NEIGHBORHOOD SEARCH ---
-                match_neigh = neighborhoods[neighborhoods.contains(p)]
-                neigh_name = match_neigh.iloc[0]['name'] if not match_neigh.empty else None
+                # Neighborhood & Municipality Search
+                m_neigh = neighborhoods[neighborhoods.contains(p)]
+                neigh_name = m_neigh.iloc[0]['name'] if not m_neigh.empty else None
                 
-                # --- MUNICIPALITY SEARCH ---
-                match_city = municipalities[municipalities.contains(p)]
-                city_name = match_city.iloc[0]['name'] if not match_city.empty else "Off-Map"
+                m_city = municipalities[municipalities.contains(p)]
+                city_name = m_city.iloc[0]['name'] if not m_city.empty else "Off-Map"
                 
-                # --- LOGIC: AREA_NAME VS MUNICIPALITY ---
-                # area_name = Neighborhood name (e.g. Kitsilano)
-                # If no neighborhood is found, fallback to Municipality name
-                final_area_name = neigh_name if neigh_name else city_name
-                
-                # --- DIRECTION LOGIC ---
-                # Convert 0/1 ID to descriptive English labels
-                direction_label = "Inbound" if v.trip.direction_id == 0 else "Outbound"
+                # Final logic for area_name (Priority Neighborhood)
+                final_area = neigh_name if neigh_name else city_name
 
                 bus_batch.append({
                     "vehicle_no": v.vehicle.id,
                     "route_no": v.trip.route_id,
-                    "direction": direction_label,
+                    "direction": "Inbound" if v.trip.direction_id == 0 else "Outbound",
                     "latitude": v.position.latitude,
                     "longitude": v.position.longitude,
-                    "area_name": final_area_name,
+                    "area_name": final_area,
                     "municipality": city_name,
                     "delay_seconds": delays.get(v.trip.trip_id, 0),
-                    "recorded_time": pd.to_datetime(v.timestamp, unit='s').isoformat(),
-                    "destination": "N/A" # Place holder for Static GTFS integration
+                    "recorded_time": pd.to_datetime(v.timestamp, unit='s').isoformat()
                 })
 
-        # 4. DATABASE UPSERT
+        # 3. SUPABASE UPLOAD
         if alerts:
-            # We capture the result in the 'response' variable
-            response_alerts = supabase.table("service_alerts").upsert(alerts, on_conflict="alert_id").execute()
-            print("Alerts uploaded.")
+            supabase.table("service_alerts").upsert(alerts, on_conflict="alert_id").execute()
+            print(f"Alerts: {len(alerts)} uploaded.")
 
         if bus_batch:
-            # WE MUST ASSIGN THE RESULT TO 'response' HERE
+            # On stocke le résultat pour confirmer l'envoi
             response = supabase.table("bus_positions").insert(bus_batch).execute()
-            print(f"Final Success: {len(bus_batch)} bus positions uploaded.")
+            print(f"Success: {len(bus_batch)} vehicles uploaded to Supabase.")
+            log_data["status"] = "Success"
+            log_data["bus_count"] = len(bus_batch)
 
     except Exception as e:
         print(f"Pipeline Error: {e}")
+        log_data["status"] = "Error"
+        log_data["error_message"] = str(e)
+
+    # 4. FINAL LOGGING
+    try:
+        supabase.table("pipeline_logs").insert(log_data).execute()
+    except:
+        print("Could not save log to database.")
 
 if __name__ == "__main__":
     run_pipeline()
