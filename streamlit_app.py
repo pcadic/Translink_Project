@@ -52,16 +52,9 @@ if not raw_df.empty:
     else:
         df_working = raw_df.copy()
 
-    # Search a specific route
-    search_route = st.sidebar.text_input("🔍 Search Route (e.g. 99, R5):")
-    
-    # Neighborhood filter
     all_areas = sorted(df_working['area_name'].unique())
     selected_areas = st.sidebar.multiselect("Neighborhoods", options=all_areas, default=all_areas)
-    
     df = df_working[df_working['area_name'].isin(selected_areas)].copy()
-    if search_route:
-        df = df[df['route_no'].astype(str).str.contains(search_route)]
 
     st.title(f"📊 TransLink Analytics - {mode}")
 
@@ -74,7 +67,6 @@ if not raw_df.empty:
     
     route_stats = df.groupby('route_no')['delay_min'].mean().sort_values(ascending=False)
     slowest_route = route_stats.idxmax() if not route_stats.empty else "N/A"
-    
     area_stats = df.groupby('area_name')['delay_min'].mean()
     worst_area = area_stats.idxmax() if not area_stats.empty else "N/A"
 
@@ -86,11 +78,22 @@ if not raw_df.empty:
 
     st.divider()
 
-    # --- SECTION 2: CHARTS ---
+    # --- SECTION 2: DELAY CHARTS ---
     c1, c2 = st.columns(2)
 
     with c1:
-        st.subheader("🏘️ Average Delay by Neighborhood")
+        st.subheader("🏆 Top 10 Most Delayed Routes")
+        top_10_routes = route_stats.head(10).reset_index()
+        fig_route, ax_route = plt.subplots(figsize=(10, 7))
+        # Gradient colors: more delay = darker red
+        colors_route = [plt.cm.Reds(0.4 + 0.5 * (i/10)) for i in range(10)][::-1]
+        ax_route.barh(top_10_routes['route_no'].astype(str), top_10_routes['delay_min'], color=colors_route)
+        ax_route.set_xlabel("Average Delay (min)")
+        ax_route.invert_yaxis() # Highest delay on top
+        st.pyplot(fig_route)
+
+    with c2:
+        st.subheader("🏘️ Delay by Neighborhood")
         plot_data = area_stats.sort_values().reset_index()
         def get_color(val, min_val, max_val):
             if val < 0:
@@ -99,32 +102,28 @@ if not raw_df.empty:
             else:
                 mag = val / max_val if max_val > 0 else 0
                 return mcolors.to_hex(plt.cm.Reds(0.3 + 0.6 * mag))
-
         min_d, max_d = plot_data['delay_min'].min(), plot_data['delay_min'].max()
         bar_colors = [get_color(x, min_d, max_d) for x in plot_data['delay_min']]
-        
-        fig, ax = plt.subplots(figsize=(10, 7))
-        ax.barh(plot_data['area_name'], plot_data['delay_min'], color=bar_colors)
-        ax.axvline(0, color='black', linewidth=1.5)
-        ax.set_xlabel("Delay (min)")
-        st.pyplot(fig)
+        fig_area, ax_area = plt.subplots(figsize=(10, 7))
+        ax_area.barh(plot_data['area_name'], plot_data['delay_min'], color=bar_colors)
+        ax_area.axvline(0, color='black', linewidth=1.5)
+        ax_area.set_xlabel("Delay (min)")
+        st.pyplot(fig_area)
 
-    with c2:
-        st.subheader("📈 Delay Distribution")
-        fig2, ax2 = plt.subplots(figsize=(10, 7))
-        sns.histplot(df['delay_min'], bins=20, kde=False, color="#6a1b9a", ax=ax2, alpha=0.6)
-        ax2_twin = ax2.twinx()
-        sns.kdeplot(df['delay_min'], color="#ff9100", ax=ax2_twin, lw=3)
-        ax2_twin.set_yticks([])
-        ax2.set_xlabel("Delay (min)")
-        st.pyplot(fig2)
-
-    # --- SECTION 3: TOP 10 DELAYED ROUTES ---
     st.divider()
-    st.subheader("🏆 Top 10 Most Delayed Routes")
-    top_routes = route_stats.head(10).reset_index()
-    top_routes.columns = ['Route', 'Avg Delay (min)']
-    st.table(top_routes)
+
+    # --- SECTION 3: OCCUPANCY (CROWDING) ---
+    st.subheader("👥 Fleet Occupancy Status")
+    
+    # Check if occupancy data exists (TransLink uses 'LoadQuotas' or occupancy labels in GTFS-RT)
+    if 'occupancy' in df.columns and not df['occupancy'].isnull().all():
+        occ_counts = df['occupancy'].value_counts()
+        fig_occ, ax_occ = plt.subplots(figsize=(8, 4))
+        sns.barplot(x=occ_counts.index, y=occ_counts.values, palette="viridis", ax=ax_occ)
+        ax_occ.set_ylabel("Number of Buses")
+        st.pyplot(fig_occ)
+    else:
+        st.info("💡 Live occupancy data is not currently available in the feed. Most TransLink buses transmit this via APC (Automatic Passenger Counters) which is often filtered in basic API tiers.")
 
     # --- SECTION 4: MAP ---
     st.divider()
