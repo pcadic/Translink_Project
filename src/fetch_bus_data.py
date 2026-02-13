@@ -86,15 +86,15 @@ def run_pipeline():
                 })
 
         # 4. DATABASE UPSERT
+        if alerts:
+            # We capture the result in the 'response' variable
+            response_alerts = supabase.table("service_alerts").upsert(alerts, on_conflict="alert_id").execute()
+            print("Alerts uploaded.")
+
         if bus_batch:
-            # We use .insert() to keep historical data for the "Time of Day" analysis
-            supabase.table("bus_positions").insert(bus_batch).execute()
-            print(f"Success: Processed {len(bus_batch)} vehicles across Metro Vancouver.")
-            # Add these lines to debug:
-            if hasattr(response, 'error') and response.error:
-                print(f"Supabase Error: {response.error}")
-            else:
-                print(f"Supabase Success: {len(bus_batch)} rows committed.")
+            # WE MUST ASSIGN THE RESULT TO 'response' HERE
+            response = supabase.table("bus_positions").insert(bus_batch).execute()
+            print(f"Final Success: {len(bus_batch)} bus positions uploaded.")
 
     except Exception as e:
         print(f"Pipeline Error: {e}")
