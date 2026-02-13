@@ -43,7 +43,7 @@ def run_pipeline():
 
         # 2. SPATIAL DATA PREPARATION
         # Load GeoJSON and separate into two layers for the "Nested" search
-        gdf = gpd.read_file('metro_vancouver_map(1).geojson')
+        gdf = gpd.read_file('metro_vancouver_map.geojson')
         neighborhoods = gdf[gdf['area_type'] == 'neighborhood']
         municipalities = gdf[gdf['area_type'] == 'municipality']
 
