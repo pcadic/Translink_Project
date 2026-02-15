@@ -22,47 +22,46 @@ def get_feed(endpoint):
     return feed
 
 def run_pipeline():
-    print("Log: Starting pipeline with proper City/Neighborhood mapping...")
+    print("Log: Starting clean pipeline (City/Neighborhood focus)...")
     bus_batch = []
 
     try:
-        # 1. RÉCUPÉRATION DES DONNÉES TEMPS RÉEL
+        # 1. DATA FETCH
         pos_feed = get_feed("gtfsposition")
         rt_feed = get_feed("gtfsrealtime")
-        
-        # Dictionnaire des retards
         delays = {ent.trip_update.trip.trip_id: ent.trip_update.stop_time_update[0].arrival.delay 
                   for ent in rt_feed.entity if ent.HasField('trip_update') and ent.trip_update.stop_time_update}
 
-        # 2. CHARGEMENT DU GEOJSON (Ton chemin spécifique)
+        # 2. GEO DATA
         gdf = gpd.read_file('data/metro_vancouver_map.geojson')
         
-        # On sépare les couches pour la détection double
+        # Séparation stricte
         neighborhoods = gdf[gdf['area_type'] == 'neighborhood']
         municipalities = gdf[gdf['area_type'] == 'municipality']
 
-        # 3. TRAITEMENT GÉOSPATIAL
+        # 3. PROCESSING
         for entity in pos_feed.entity:
             if entity.HasField('vehicle'):
                 v = entity.vehicle
                 p = Point(v.position.longitude, v.position.latitude)
                 
-                # Étape A: Trouver le quartier (ex: Kitsilano, Metrotown)
-                m_neigh = neighborhoods[neighborhoods.contains(p)]
-                neigh_name = m_neigh.iloc[0]['name'] if not m_neigh.empty else None
-                
-                # Étape B: Trouver la ville (ex: Vancouver, Burnaby)
+                # RECHERCHE VILLE (Obligatoire)
                 m_city = municipalities[municipalities.contains(p)]
                 city_name = m_city.iloc[0]['name'] if not m_city.empty else "Off-Map"
                 
-                # Étape C: Déterminer area_name et area_type pour la table
-                # Si on a trouvé un quartier, on le met en priorité
-                if neigh_name:
-                    final_area_name = neigh_name
-                    final_area_type = "neighborhood"
-                else:
-                    final_area_name = city_name
-                    final_area_type = "municipality"
+                # RECHERCHE QUARTIER
+                m_neigh = neighborhoods[neighborhoods.contains(p)]
+                neigh_name = None
+                if not m_neigh.empty:
+                    # On prend le premier quartier qui n'est pas juste le nom de la ville
+                    for name in m_neigh['name']:
+                        if name != city_name:
+                            neigh_name = name
+                            break
+                
+                # LOGIQUE FINALE
+                final_area_name = neigh_name if neigh_name else city_name
+                final_area_type = "neighborhood" if neigh_name else "municipality"
 
                 bus_batch.append({
                     "vehicle_no": v.vehicle.id,
@@ -72,19 +71,18 @@ def run_pipeline():
                     "longitude": v.position.longitude,
                     "area_name": final_area_name,
                     "area_type": final_area_type,
-                    "municipality": city_name, # Toujours la ville parente
+                    "municipality": city_name,
                     "delay_seconds": delays.get(v.trip.trip_id, 0),
-                    "recorded_time": pd.to_datetime(v.timestamp, unit='s').isoformat(),
-                    "route_name": f"Line {v.trip.route_id}"
+                    "recorded_time": pd.to_datetime(v.timestamp, unit='s').isoformat()
                 })
 
-        # 4. ENVOI À SUPABASE
+        # 4. UPLOAD
         if bus_batch:
             supabase.table("bus_positions").insert(bus_batch).execute()
-            print(f"Success: {len(bus_batch)} vehicles processed with City/Neighborhood distinction.")
+            print(f"Success: {len(bus_batch)} clean rows uploaded.")
 
     except Exception as e:
-        print(f"Error in pipeline: {e}")
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     run_pipeline()
