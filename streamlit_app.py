@@ -2,145 +2,94 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import plotly.express as px # Pour la heatmap
 from supabase import create_client
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="TransLink Performance Dashboard", page_icon="🚌", layout="wide")
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Metro Vancouver Transit GIS", page_icon="🚌", layout="wide")
 
-# --- SUPABASE CONNECTION ---
 @st.cache_resource
 def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 supabase = init_connection()
 
-# --- DATA LOADING ---
 @st.cache_data(ttl=300)
 def load_data():
-    all_data = []
-    chunk_size = 1000
-    offset = 0
-    while True:
-        # On s'assure de récupérer les nouvelles colonnes
-        response = supabase.table("bus_positions").select("*").range(offset, offset + chunk_size - 1).execute()
-        data = response.data
-        all_data.extend(data)
-        if len(data) < chunk_size:
-            break
-        offset += chunk_size
-
-    df = pd.DataFrame(all_data)
+    # Récupération globale
+    response = supabase.table("bus_positions").select("*").execute()
+    df = pd.DataFrame(response.data)
     if not df.empty:
-        # Nettoyage
-        df = df.drop_duplicates(subset=['vehicle_no', 'recorded_time'])
         df['recorded_time'] = pd.to_datetime(df['recorded_time'])
         df['delay_min'] = df['delay_seconds'] / 60
+        # On filtre les données aberrantes ou hors carte
+        df = df[df['municipality'] != 'Off-Map'].copy()
     return df
 
-raw_df = load_data()
+df = load_data()
 
-# --- SIDEBAR: FILTRES AVANCÉS ---
-st.sidebar.header("⚙️ Global Filters")
-mode = st.sidebar.radio("Display Mode:", ["Real-Time (Last Run)", "Historical (Global)"])
+st.title("🚌 Metro Vancouver Transit Performance (GIS Analysis)")
 
-if not raw_df.empty:
-    if mode == "Real-Time (Last Run)":
-        latest_ts = raw_df['recorded_time'].max()
-        df_working = raw_df[raw_df['recorded_time'] == latest_ts].copy()
-    else:
-        df_working = raw_df.copy()
-
-    # --- FILTRE 1: VILLE (MUNICIPALITY) ---
-    all_cities = sorted(df_working['municipality'].unique())
-    selected_cities = st.sidebar.multiselect("Cities", options=all_cities, default=all_cities)
-    
-    # On filtre par ville d'abord pour mettre à jour la liste des quartiers
-    df_filtered_city = df_working[df_working['municipality'].isin(selected_cities)]
-
-    # --- FILTRE 2: QUARTIER (AREA_NAME) ---
-    # Ne montre que les quartiers présents dans les villes sélectionnées
-    all_areas = sorted(df_filtered_city['area_name'].unique())
-    selected_areas = st.sidebar.multiselect("Neighborhoods", options=all_areas, default=all_areas)
-    
-    # --- FILTRE 3: DIRECTION ---
-    all_dirs = sorted(df_filtered_city['direction'].unique())
-    selected_dirs = st.sidebar.multiselect("Direction", options=all_dirs, default=all_dirs)
-
-    # Application finale des filtres
-    df = df_filtered_city[
-        (df_filtered_city['area_name'].isin(selected_areas)) & 
-        (df_filtered_city['direction'].isin(selected_dirs))
-    ].copy()
-
-    st.title(f"📊 TransLink Analytics - {mode}")
+if not df.empty:
+    # --- FILTRES ---
+    st.sidebar.header("🔍 Filters")
+    selected_cities = st.sidebar.multiselect("Select Cities", options=sorted(df['municipality'].unique()), default=df['municipality'].unique())
+    df_filtered = df[df['municipality'].isin(selected_cities)]
 
     # --- SECTION 1: KPIs ---
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    unique_buses = df['vehicle_no'].nunique()
-    on_time = (df['delay_min'].between(-1, 3)).mean() * 100 if not df.empty else 0
-    avg_delay = df['delay_min'].mean() if not df.empty else 0
-    
-    route_stats = df.groupby('route_no')['delay_min'].mean().sort_values(ascending=False)
-    slowest_route = route_stats.idxmax() if not route_stats.empty else "N/A"
-    
-    area_stats = df.groupby('area_name')['delay_min'].mean()
-    worst_area = area_stats.idxmax() if not area_stats.empty else "N/A"
-
-    col1.metric("Buses On-Grid", unique_buses)
-    col2.metric("Punctuality", f"{on_time:.1f}%")
-    col3.metric("Avg Delay", f"{avg_delay:.2f} min")
-    col4.metric("Slowest Route", f"R.{slowest_route}")
-    col5.metric("Critical Zone", worst_area)
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1.metric("Total Observations", len(df_filtered))
+    kpi2.metric("Avg Delay (Global)", f"{df_filtered['delay_min'].mean():.2f} min")
+    kpi3.metric("Most Delayed City", df_filtered.groupby('municipality')['delay_min'].mean().idxmax())
+    kpi4.metric("Active Routes", df_filtered['route_no'].nunique())
 
     st.divider()
 
-    # --- SECTION 2: CHARTS ---
-    c1, c2 = st.columns(2)
+    # --- SECTION 2: ANALYSE PAR VILLE ET QUARTIER ---
+    col_v, col_q = st.columns(2)
 
-    with c1:
-        st.subheader("🏆 Top 10 Most Delayed Routes")
-        if not route_stats.empty:
-            top_10_routes = route_stats.head(10).reset_index()
-            fig_route, ax_route = plt.subplots(figsize=(10, 7))
-            colors_route = [plt.cm.Reds(0.4 + 0.5 * (i/10)) for i in range(len(top_10_routes))][::-1]
-            ax_route.barh(top_10_routes['route_no'].astype(str), top_10_routes['delay_min'], color=colors_route)
-            ax_route.set_xlabel("Average Delay (min)")
-            ax_route.invert_yaxis()
-            st.pyplot(fig_route)
-        else:
-            st.write("No route data.")
+    with col_v:
+        st.subheader("🏙️ Average Delay by City")
+        city_stats = df_filtered.groupby('municipality')['delay_min'].mean().sort_values()
+        fig_city, ax_city = plt.subplots()
+        city_stats.plot(kind='barh', color='skyblue', ax=ax_city)
+        ax_city.set_xlabel("Minutes")
+        st.pyplot(fig_city)
 
-    with c2:
-        st.subheader("🏘️ Delay by Neighborhood")
-        if not area_stats.empty:
-            plot_data = area_stats.sort_values().reset_index()
-            def get_color(val, min_val, max_val):
-                if val < 0:
-                    mag = val / min_val if min_val < 0 else 0
-                    return mcolors.to_hex(plt.cm.Greens(0.3 + 0.6 * mag))
-                mag = val / max_val if max_val > 0 else 0
-                return mcolors.to_hex(plt.cm.Reds(0.3 + 0.6 * mag))
-            
-            min_d, max_d = plot_data['delay_min'].min(), plot_data['delay_min'].max()
-            bar_colors = [get_color(x, min_d, max_d) for x in plot_data['delay_min']]
-            fig_area, ax_area = plt.subplots(figsize=(10, 7))
-            ax_area.barh(plot_data['area_name'], plot_data['delay_min'], color=bar_colors)
-            ax_area.axvline(0, color='black', linewidth=1.5)
-            ax_area.set_xlabel("Delay (min)")
-            st.pyplot(fig_area)
+    with col_q:
+        st.subheader("🏘️ Average Delay by Neighborhood")
+        # Top 15 quartiers les plus lents pour la lisibilité
+        neigh_stats = df_filtered.groupby('area_name')['delay_min'].mean().sort_values(ascending=False).head(15)
+        fig_q, ax_q = plt.subplots()
+        neigh_stats.plot(kind='barh', color='salmon', ax=ax_q)
+        ax_q.invert_yaxis()
+        st.pyplot(fig_q)
 
-    # --- SECTION 3: MAP ---
+    # --- SECTION 3: TOP 10 ROUTES ---
     st.divider()
-    st.subheader("📍 Live Bus Map")
-    if not df.empty:
-        # On affiche le dernier point connu pour chaque bus
-        df_map = df.sort_values('recorded_time', ascending=False).drop_duplicates('vehicle_no')
-        st.map(df_map)
-    else:
-        st.warning("No data for the selected filters.")
+    st.subheader("🚩 Top 10 Most Delayed Routes")
+    route_stats = df_filtered.groupby('route_no')['delay_min'].mean().sort_values(ascending=False).head(10)
+    st.bar_chart(route_stats)
+
+    # --- SECTION 4: MAPS (GIS FOCUS) ---
+    st.divider()
+    m1, m2 = st.columns(2)
+
+    with m1:
+        st.subheader("📍 Live/Recent Bus Positions")
+        # On affiche les points réels
+        st.map(df_filtered[['latitude', 'longitude']])
+
+    with m2:
+        st.subheader("🔥 Congestion Heatmap (Delay Zones)")
+        # Heatmap basée sur l'intensité des retards
+        # Plus le point est rouge/foncé, plus le retard cumulé est important
+        fig_heat = px.density_mapbox(df_filtered, 
+                                     lat='latitude', lon='longitude', z='delay_min', 
+                                     radius=15, center=dict(lat=49.25, lon=-123.12), zoom=9,
+                                     mapbox_style="carto-positron",
+                                     title="Spatial Delay Intensity")
+        st.plotly_chart(fig_heat, use_container_width=True)
 
 else:
-    st.error("No data found in Supabase. Check your scraper logs.")
+    st.warning("No data available.")
