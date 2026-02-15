@@ -22,39 +22,47 @@ def get_feed(endpoint):
     return feed
 
 def run_pipeline():
-    print("Log: Starting pipeline with City/Neighborhood distinction...")
+    print("Log: Starting pipeline with proper City/Neighborhood mapping...")
     bus_batch = []
 
     try:
-        # 1. FEEDS
+        # 1. RÉCUPÉRATION DES DONNÉES TEMPS RÉEL
         pos_feed = get_feed("gtfsposition")
         rt_feed = get_feed("gtfsrealtime")
+        
+        # Dictionnaire des retards
         delays = {ent.trip_update.trip.trip_id: ent.trip_update.stop_time_update[0].arrival.delay 
                   for ent in rt_feed.entity if ent.HasField('trip_update') and ent.trip_update.stop_time_update}
 
-        # 2. GEOJSON (Correction du chemin)
+        # 2. CHARGEMENT DU GEOJSON (Ton chemin spécifique)
         gdf = gpd.read_file('data/metro_vancouver_map.geojson')
+        
+        # On sépare les couches pour la détection double
         neighborhoods = gdf[gdf['area_type'] == 'neighborhood']
         municipalities = gdf[gdf['area_type'] == 'municipality']
 
-        # 3. PROCESSING
+        # 3. TRAITEMENT GÉOSPATIAL
         for entity in pos_feed.entity:
             if entity.HasField('vehicle'):
                 v = entity.vehicle
                 p = Point(v.position.longitude, v.position.latitude)
                 
-                # RECHERCHE DU QUARTIER
+                # Étape A: Trouver le quartier (ex: Kitsilano, Metrotown)
                 m_neigh = neighborhoods[neighborhoods.contains(p)]
                 neigh_name = m_neigh.iloc[0]['name'] if not m_neigh.empty else None
                 
-                # RECHERCHE DE LA VILLE
+                # Étape B: Trouver la ville (ex: Vancouver, Burnaby)
                 m_city = municipalities[municipalities.contains(p)]
                 city_name = m_city.iloc[0]['name'] if not m_city.empty else "Off-Map"
                 
-                # LOGIQUE DE REMPLISSAGE DES COLONNES
-                # Si on est dans un quartier, area_name = quartier. Sinon area_name = ville.
-                final_area_name = neigh_name if neigh_name else city_name
-                final_area_type = "neighborhood" if neigh_name else "municipality"
+                # Étape C: Déterminer area_name et area_type pour la table
+                # Si on a trouvé un quartier, on le met en priorité
+                if neigh_name:
+                    final_area_name = neigh_name
+                    final_area_type = "neighborhood"
+                else:
+                    final_area_name = city_name
+                    final_area_type = "municipality"
 
                 bus_batch.append({
                     "vehicle_no": v.vehicle.id,
@@ -63,20 +71,20 @@ def run_pipeline():
                     "latitude": v.position.latitude,
                     "longitude": v.position.longitude,
                     "area_name": final_area_name,
-                    "area_type": final_area_type,    # ENFIN REMPLI ICI
-                    "municipality": city_name,      # TOUJOURS LA VILLE ICI
+                    "area_type": final_area_type,
+                    "municipality": city_name, # Toujours la ville parente
                     "delay_seconds": delays.get(v.trip.trip_id, 0),
                     "recorded_time": pd.to_datetime(v.timestamp, unit='s').isoformat(),
                     "route_name": f"Line {v.trip.route_id}"
                 })
 
-        # 4. ENVOI
+        # 4. ENVOI À SUPABASE
         if bus_batch:
             supabase.table("bus_positions").insert(bus_batch).execute()
-            print(f"Success: {len(bus_batch)} rows added with area_type distinction.")
+            print(f"Success: {len(bus_batch)} vehicles processed with City/Neighborhood distinction.")
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error in pipeline: {e}")
 
 if __name__ == "__main__":
     run_pipeline()
