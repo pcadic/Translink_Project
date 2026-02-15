@@ -23,86 +23,62 @@ def get_feed(endpoint):
 
 def run_pipeline():
     print("Log: Starting synchronized pipeline...")
-    log_data = {"status": "Success", "bus_count": 0, "alert_count": 0}
+    log_data = {"status": "Success", "bus_count": 0}
     bus_batch = []
-    alerts = []
 
     try:
-        # 1. FETCH DATA
+        # 1. RÉCUPÉRATION DES FLUX
         pos_feed = get_feed("gtfsposition")
         rt_feed = get_feed("gtfsrealtime")
         
-        # Map delays and search for trip metadata
-        delays = {}
-        trip_meta = {}
-        for entity in rt_feed.entity:
-            if entity.HasField('trip_update'):
-                tu = entity.trip_update
-                t_id = tu.trip.trip_id
-                if tu.stop_time_update:
-                    delays[t_id] = tu.stop_time_update[0].arrival.delay
-                # Store extra info if available
-                trip_meta[t_id] = {"route_id": tu.trip.route_id}
-            
-            if entity.HasField('alert'):
-                alerts.append({
-                    "alert_id": entity.id,
-                    "header": str(entity.alert.header_text.translation[0].text)[:255]
-                })
+        # Mapping des délais par TripID
+        delays = {ent.trip_update.trip.trip_id: ent.trip_update.stop_time_update[0].arrival.delay 
+                  for ent in rt_feed.entity if ent.HasField('trip_update') and ent.trip_update.stop_time_update}
 
-        # 2. GEOGRAPHIC PROCESSING
+        # 2. CHARGEMENT GEOJSON
         gdf = gpd.read_file('data/metro_vancouver_map.geojson')
         neighborhoods = gdf[gdf['area_type'] == 'neighborhood']
         municipalities = gdf[gdf['area_type'] == 'municipality']
 
+        # 3. TRAITEMENT DES BUS
         for entity in pos_feed.entity:
             if entity.HasField('vehicle'):
                 v = entity.vehicle
-                lat, lon = v.position.latitude, v.position.longitude
-                p = Point(lon, lat)
+                p = Point(v.position.longitude, v.position.latitude)
                 
-                # Double spatial join
+                # Double détection spatiale
                 m_neigh = neighborhoods[neighborhoods.contains(p)]
                 neigh_name = m_neigh.iloc[0]['name'] if not m_neigh.empty else None
                 
                 m_city = municipalities[municipalities.contains(p)]
                 city_name = m_city.iloc[0]['name'] if not m_city.empty else "Off-Map"
                 
-                # Logic for columns
-                direction_txt = "Inbound" if v.trip.direction_id == 0 else "Outbound"
-                
+                # Attribution des champs pour correspondre à ton SQL
                 bus_batch.append({
                     "vehicle_no": v.vehicle.id,
                     "route_no": v.trip.route_id,
-                    "direction": direction_txt,
-                    "latitude": lat,
-                    "longitude": lon,
+                    "route_name": f"Line {v.trip.route_id}", # Nom par défaut
+                    "direction": "Inbound" if v.trip.direction_id == 0 else "Outbound",
+                    "latitude": v.position.latitude,
+                    "longitude": v.position.longitude,
                     "area_name": neigh_name if neigh_name else city_name,
                     "municipality": city_name,
                     "delay_seconds": delays.get(v.trip.trip_id, 0),
                     "recorded_time": pd.to_datetime(v.timestamp, unit='s').isoformat(),
-                    # These match your new SQL columns:
-                    "route_name": f"Route {v.trip.route_id}", # Placeholder until static GTFS
-                    "destination": "Check Terminal",
-                    "pattern": v.trip.trip_id # Using TripID as pattern
+                    "destination": "See Schedule"
                 })
 
-        # 3. UPLOAD TO SUPABASE
-        if alerts:
-            supabase.table("service_alerts").upsert(alerts, on_conflict="alert_id").execute()
-        
+        # 4. ENVOI SUPABASE
         if bus_batch:
-            # We use the correct table name and confirm columns match your SQL
-            result = supabase.table("bus_positions").insert(bus_batch).execute()
-            print(f"Success: {len(bus_batch)} vehicles pushed to Supabase.")
+            supabase.table("bus_positions").insert(bus_batch).execute()
+            print(f"Success: {len(bus_batch)} buses pushed to database.")
             log_data["bus_count"] = len(bus_batch)
 
     except Exception as e:
         print(f"Pipeline Error: {e}")
         log_data["status"] = "Error"
-        log_data["error_message"] = str(e)
 
-    # 4. LOGGING
+    # Logging final
     try:
         supabase.table("pipeline_logs").insert(log_data).execute()
     except:
