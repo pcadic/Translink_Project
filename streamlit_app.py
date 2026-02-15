@@ -136,5 +136,34 @@ if not raw_df.empty:
         ax_area.axvline(0, color='black', linewidth=1)
         st.pyplot(fig_area)
 
+
+    # --- SECTION NOUVELLE: TIME-SERIES ANALYSIS ---
+    st.divider()
+    st.subheader("⏰ Hourly Delay Trends")
+    
+    if not df.empty:
+        # On extrait l'heure de chaque enregistrement
+        df['hour'] = df['recorded_time'].dt.hour
+        
+        # On calcule la moyenne des retards par heure
+        hourly_trend = df.groupby('hour')['delay_min'].mean().reset_index()
+        
+        fig_time, ax_time = plt.subplots(figsize=(12, 4))
+        ax_time.plot(hourly_trend['hour'], hourly_trend['delay_min'], marker='o', linestyle='-', color='#1f77b4', linewidth=2)
+        
+        # Mise en forme pour que ce soit pro
+        ax_time.set_xticks(range(0, 24))
+        ax_time.set_xlabel("Hour of the Day (24h)")
+        ax_time.set_ylabel("Avg Delay (min)")
+        ax_time.grid(True, alpha=0.3)
+        
+        # Ajout de zones colorées pour les heures de pointe (Peak Hours)
+        ax_time.axvspan(7, 9, color='orange', alpha=0.1, label='Morning Peak')
+        ax_time.axvspan(15, 18, color='red', alpha=0.1, label='Evening Peak')
+        
+        st.pyplot(fig_time)
+    else:
+        st.write("Not enough data for time analysis.")
+
 else:
     st.error("No data found in Supabase.")
