@@ -22,44 +22,60 @@ def get_feed(endpoint):
     return feed
 
 def run_pipeline():
-    print("Log: Starting clean pipeline (City/Neighborhood focus)...")
+    print("Log: Démarrage du pipeline complet (Bus + Alertes)...")
     bus_batch = []
+    alerts_batch = []
 
     try:
-        # 1. DATA FETCH
+        # 1. RÉCUPÉRATION DES FLUX API
         pos_feed = get_feed("gtfsposition")
         rt_feed = get_feed("gtfsrealtime")
+        
+        # Mapping des délais par TripID
         delays = {ent.trip_update.trip.trip_id: ent.trip_update.stop_time_update[0].arrival.delay 
                   for ent in rt_feed.entity if ent.HasField('trip_update') and ent.trip_update.stop_time_update}
 
-        # 2. GEO DATA
+        # 2. GESTION DES ALERTES (SERVICE ALERTS)
+        for entity in rt_feed.entity:
+            if entity.HasField('alert'):
+                try:
+                    # On cherche la première traduction disponible
+                    header_text = entity.alert.header_text.translation[0].text
+                except:
+                    header_text = "Alerte de service (Détails non disponibles)"
+                
+                alerts_batch.append({
+                    "alert_id": entity.id,
+                    "header": str(header_text)[:255],
+                    "recorded_time": pd.Timestamp.now(tz='UTC').isoformat()
+                })
+
+        # 3. CHARGEMENT DES DONNÉES GÉOSPATIALES (GEOJSON)
         gdf = gpd.read_file('data/metro_vancouver_map.geojson')
-        
-        # Séparation stricte
         neighborhoods = gdf[gdf['area_type'] == 'neighborhood']
         municipalities = gdf[gdf['area_type'] == 'municipality']
 
-        # 3. PROCESSING
+        # 4. TRAITEMENT DES POSITIONS DE BUS
         for entity in pos_feed.entity:
             if entity.HasField('vehicle'):
                 v = entity.vehicle
                 p = Point(v.position.longitude, v.position.latitude)
                 
-                # RECHERCHE VILLE (Obligatoire)
+                # A. Trouver la Ville (Municipality)
                 m_city = municipalities[municipalities.contains(p)]
                 city_name = m_city.iloc[0]['name'] if not m_city.empty else "Off-Map"
                 
-                # RECHERCHE QUARTIER
+                # B. Trouver le Quartier (Neighborhood)
                 m_neigh = neighborhoods[neighborhoods.contains(p)]
                 neigh_name = None
                 if not m_neigh.empty:
-                    # On prend le premier quartier qui n'est pas juste le nom de la ville
+                    # On s'assure de ne pas prendre le nom de la ville comme quartier
                     for name in m_neigh['name']:
                         if name != city_name:
                             neigh_name = name
                             break
                 
-                # LOGIQUE FINALE
+                # C. Définition des étiquettes finales
                 final_area_name = neigh_name if neigh_name else city_name
                 final_area_type = "neighborhood" if neigh_name else "municipality"
 
@@ -73,16 +89,25 @@ def run_pipeline():
                     "area_type": final_area_type,
                     "municipality": city_name,
                     "delay_seconds": delays.get(v.trip.trip_id, 0),
-                    "recorded_time": pd.to_datetime(v.timestamp, unit='s').isoformat()
+                    "recorded_time": pd.to_datetime(v.timestamp, unit='s').isoformat(),
+                    "route_name": f"Line {v.trip.route_id}"
                 })
 
-        # 4. UPLOAD
+        # 5. ENVOI DES DONNÉES À SUPABASE
+        # Envoi des Alertes
+        if alerts_batch:
+            supabase.table("service_alerts").upsert(alerts_batch, on_conflict="alert_id").execute()
+            print(f"✅ {len(alerts_batch)} alertes mises à jour.")
+        else:
+            print("ℹ️ Aucune alerte de service détectée actuellement.")
+
+        # Envoi des Bus
         if bus_batch:
             supabase.table("bus_positions").insert(bus_batch).execute()
-            print(f"Success: {len(bus_batch)} clean rows uploaded.")
+            print(f"✅ {len(bus_batch)} positions de bus envoyées.")
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Erreur durant le pipeline : {e}")
 
 if __name__ == "__main__":
     run_pipeline()
