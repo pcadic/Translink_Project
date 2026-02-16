@@ -41,6 +41,25 @@ def run_pipeline():
         })
 
         # --- 2. TRAITEMENT DES VRAIES ALERTES ---
+        # --- TEST MINIMALISTE DANS TON SCRIPT ---
+        try:
+            test_alert = {
+                "alert_id": "DEBUG_TEST_999",
+                "header_text": "Ceci est un test minimal",
+                "description_text": "Si ceci apparait, la table fonctionne.",
+                "created_at": datetime.now().isoformat()
+            }
+            
+            print("Tentative d'insertion du test...")
+            # On utilise .insert() au lieu de .upsert() pour le test
+            response = supabase.table("service_alerts").insert(test_alert).execute()
+            print("Réponse de Supabase:", response)
+        
+        except Exception as e:
+            print(f"L'ERREUR RÉELLE EST ICI : {e}")
+            # Ne pas continuer le script si le test échoue
+            raise e
+    
         for entity in rt_feed.entity:
             if entity.HasField('alert'):
                 a = entity.alert
