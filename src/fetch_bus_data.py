@@ -36,17 +36,21 @@ def run_pipeline():
                   for ent in rt_feed.entity if ent.HasField('trip_update') and ent.trip_update.stop_time_update}
 
         # 2. GESTION DES ALERTES (SERVICE ALERTS)
+        # --- VERSION DE TEST ROBUSTE POUR LES ALERTES ---
         for entity in rt_feed.entity:
             if entity.HasField('alert'):
-                try:
-                    # On cherche la première traduction disponible
-                    header_text = entity.alert.header_text.translation[0].text
-                except:
-                    header_text = "Alerte de service (Détails non disponibles)"
+                # Initialisation par défaut
+                header_text = "Alerte sans titre"
                 
+                # Tentative d'extraction du texte
+                if entity.alert.header_text.translation:
+                    header_text = entity.alert.header_text.translation[0].text
+                elif entity.alert.description_text.translation:
+                    header_text = entity.alert.description_text.translation[0].text
+                    
                 alerts_batch.append({
-                    "alert_id": entity.id,
-                    "header": str(header_text)[:255],
+                    "alert_id": str(entity.id), # On s'assure que c'est un string
+                    "header": header_text[:255],
                     "recorded_time": pd.Timestamp.now(tz='UTC').isoformat()
                 })
 
