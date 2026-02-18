@@ -35,8 +35,10 @@ def run_pipeline():
         
         # 2. TRAITEMENT DES ALERTES
         print(f"Analyse de {len(rt_feed.entity)} entités pour les alertes...")
+        alert_count_found = 0 # Compteur de diagnostic
         for entity in rt_feed.entity:
             if entity.HasField('alert'):
+                alert_count_found += 1
                 a = entity.alert
                 
                 # Extraction sécurisée des textes
@@ -61,7 +63,8 @@ def run_pipeline():
                     "end_time": e_time,
                     "created_at": datetime.now().isoformat()
                 })
-
+        print(f"DEBUG: Nombre d'alertes réelles détectées dans le flux: {alert_count_found}")
+        
         # 3. TRAITEMENT DES BUS (GEOSPATIAL)
         print("Chargement du GeoJSON et traitement des bus...")
         gdf = gpd.read_file('data/metro_vancouver_map.geojson')
