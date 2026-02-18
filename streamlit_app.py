@@ -123,5 +123,35 @@ if not raw_df.empty:
                                  mapbox_style="carto-positron", height=600)
     st.plotly_chart(fig_heat, use_container_width=True)
 
+    
+    # --- SECTION : ANALYSE DE LA VOLATILITÉ ---
+    st.markdown("---")
+    st.subheader("📊 Neighborhood Volatility Analysis")
+    
+    if not df.empty:
+        # On calcule l'écart-type (standard deviation) des retards par quartier
+        # Cela montre où les retards sont les plus "imprévisibles"
+        volatility = df.groupby('area_name')['delay_min'].agg(['mean', 'std', 'count']).dropna()
+        volatility = volatility[volatility['count'] > 5] # On filtre pour avoir assez de données
+        top_volatile = volatility.sort_values(by='std', ascending=False).head(5)
+    
+        col_v1, col_v2 = st.columns([1, 2])
+        
+        with col_v1:
+            st.write("Quartiers où le retard est le plus **imprévisible** (Variation élevée) :")
+            st.dataframe(top_volatile[['mean', 'std']].style.format("{:.2f}"))
+    
+        with col_v2:
+            # Un graphique qui montre la moyenne vs l'instabilité
+            fig_vol, ax_vol = plt.subplots(figsize=(10, 5))
+            ax_vol.scatter(volatility['mean'], volatility['std'], alpha=0.5, color='purple')
+            ax_vol.set_xlabel("Average Delay (min)")
+            ax_vol.set_ylabel("Delay Stability (Std Dev)")
+            # Annotation des points les plus critiques
+            for i, txt in enumerate(top_volatile.index):
+                ax_vol.annotate(txt, (top_volatile['mean'].iloc[i], top_volatile['std'].iloc[i]))
+            st.pyplot(fig_vol)
+
+
 else:
     st.warning("No data found. Check your database or run the scraper.")
