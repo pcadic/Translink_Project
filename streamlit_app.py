@@ -124,33 +124,46 @@ if not raw_df.empty:
     st.plotly_chart(fig_heat, use_container_width=True)
 
     
-    # --- SECTION : ANALYSE DE LA VOLATILITÉ ---
+    # --- SECTION : ANALYSE DE LA VOLATILITÉ (INTERACTIVE) ---
     st.markdown("---")
     st.subheader("📊 Neighborhood Volatility Analysis")
     
     if not df.empty:
-        # On calcule l'écart-type (standard deviation) des retards par quartier
-        # Cela montre où les retards sont les plus "imprévisibles"
-        volatility = df.groupby('area_name')['delay_min'].agg(['mean', 'std', 'count']).dropna()
-        volatility = volatility[volatility['count'] > 5] # On filtre pour avoir assez de données
-        top_volatile = volatility.sort_values(by='std', ascending=False).head(5)
+        # Calcul des stats par quartier
+        volatility = df.groupby('area_name')['delay_min'].agg(['mean', 'std', 'count']).reset_index()
+        # On garde les quartiers avec au moins 3 relevés pour que l'écart-type ait du sens
+        volatility = volatility[volatility['count'] >= 3].dropna()
     
-        col_v1, col_v2 = st.columns([1, 2])
-        
-        with col_v1:
-            st.write("Quartiers où le retard est le plus **imprévisible** (Variation élevée) :")
-            st.dataframe(top_volatile[['mean', 'std']].style.format("{:.2f}"))
+        if not volatility.empty:
+            # Création du graphique interactif avec Plotly
+            fig_vol = px.scatter(
+                volatility, 
+                x="mean", 
+                y="std",
+                size="count", # La taille du point dépend du nombre de bus observés
+                color="mean", # La couleur dépend du retard moyen
+                hover_name="area_name", # Affiche le nom du quartier au survol
+                labels={
+                    "mean": "Average Delay (min)",
+                    "std": "Delay Variation (Volatility)",
+                    "count": "Number of Records"
+                },
+                color_continuous_scale="RdYlGn_r", # Notre fameux dégradé vert-rouge
+                title="Stability vs. Delay by Neighborhood"
+            )
     
-        with col_v2:
-            # Un graphique qui montre la moyenne vs l'instabilité
-            fig_vol, ax_vol = plt.subplots(figsize=(10, 5))
-            ax_vol.scatter(volatility['mean'], volatility['std'], alpha=0.5, color='purple')
-            ax_vol.set_xlabel("Average Delay (min)")
-            ax_vol.set_ylabel("Delay Stability (Std Dev)")
-            # Annotation des points les plus critiques
-            for i, txt in enumerate(top_volatile.index):
-                ax_vol.annotate(txt, (top_volatile['mean'].iloc[i], top_volatile['std'].iloc[i]))
-            st.pyplot(fig_vol)
+            # Amélioration du design
+            fig_vol.update_layout(
+                plot_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(gridcolor='lightgrey'),
+                yaxis=dict(gridcolor='lightgrey')
+            )
+    
+            st.plotly_chart(fig_vol, use_container_width=True)
+            
+            st.info("💡 **How to read this?** Points on the **top-right** are your problem zones: they are both slow and unpredictable. Points on the **bottom-left** are your gold standard: fast and reliable.")
+        else:
+            st.write("Not enough data points yet to calculate volatility.")
 
 
 else:
