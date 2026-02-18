@@ -34,27 +34,42 @@ def load_geojson():
     return gdf[gdf['area_type'] == 'neighborhood']
 
 # --- LOGIQUE PRINCIPALE ---
-st.title("🤖 Neighborhood Clustering Analysis")
+st.title("🤖 Neighborhood & City Clustering Analysis")
 df_all = load_clustering_data()
 geojson_data = load_geojson()
 
 if not df_all.empty:
-    # 1. PRÉPARATION DES STATS
+    # 1. PRÉPARATION DES STATS (On baisse le seuil à 2 relevés)
     stats = df_all.groupby('area_name')['delay_min'].agg(['mean', 'std', 'count']).reset_index()
-    stats = stats[stats['count'] > 5].dropna()
+    
+    # On remplace les NaN dans 'std' par 0 (si un seul relevé, pas de variation)
+    stats['std'] = stats['std'].fillna(0)
+    
+    # On garde presque tout pour voir les villes périphériques
+    stats = stats[stats['count'] >= 2] 
 
     if len(stats) > 3:
         # 2. K-MEANS ML
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(stats[['mean', 'std']])
         
-        n_clusters = st.sidebar.slider("Nombre de profils (Clusters)", 2, 5, 3)
+        n_clusters = st.sidebar.slider("Nombre de profils", 2, 5, 3)
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         stats['cluster'] = kmeans.fit_predict(X_scaled).astype(str)
 
-        # 3. JOINTURE AVEC LE GEOJSON
-        # On fusionne les résultats du ML avec les formes géographiques
-        map_df = geojson_data.merge(stats, left_on='name', right_on='area_name')
+        # 3. JOINTURE ROBUSTE
+        # On s'assure que les noms sont en majuscules/minuscules identiques
+        geojson_data['name_clean'] = geojson_data['name'].str.strip()
+        stats['area_name_clean'] = stats['area_name'].str.strip()
+        
+        map_df = geojson_data.merge(stats, left_on='name_clean', right_on='area_name_clean', how='inner')
+
+        # Diagnostic pour toi dans Streamlit
+        if len(map_df) < len(stats):
+            missing = set(stats['area_name_clean']) - set(geojson_data['name_clean'])
+            st.warning(f"Note: {len(missing)} zones n'ont pas de correspondance géométrique (ex: {list(missing)[:3]})")
+
+        # --- LE RESTE DU CODE (PLOTS) RESTE IDENTIQUE ---
 
         # --- AFFICHAGE ---
         col_left, col_right = st.columns([1, 1])
