@@ -53,6 +53,9 @@ st.markdown("Analyze how transit delays evolve throughout the day based on colle
 
 df = load_temporal_data()
 
+with st.expander("🛠️ Raw Data Check"):
+    st.write(df[['area_name', 'recorded_time', 'hour']].tail(10))
+
 if not df.empty:
     # 1. GLOBAL TREND (Line Chart)
     st.subheader("🏙️ City-Wide Hourly Delay")
