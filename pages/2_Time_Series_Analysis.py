@@ -17,18 +17,26 @@ supabase = init_connection()
 @st.cache_data(ttl=600)
 def load_temporal_data():
     try:
-        # We need recorded_time to track the 'when'
         response = supabase.table("bus_positions").select("recorded_time, delay_seconds, area_name").execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
+            # 1. Convert to datetime
             df['recorded_time'] = pd.to_datetime(df['recorded_time'])
+            
+            # 2. Force conversion to Vancouver Time (PST)
+            # This shifts the UTC time to local time
+            df['recorded_time'] = df['recorded_time'].dt.tz_localize('UTC').dt.tz_convert('America/Vancouver')
+            
             df['delay_min'] = df['delay_seconds'] / 60
-            # Extract hour for grouping
+            
+            # 3. Now the hour will be correct!
             df['hour'] = df['recorded_time'].dt.hour
             return df
     except Exception as e:
         st.error(f"Database error: {e}")
     return pd.DataFrame()
+
+
 
 # --- MAIN LOGIC ---
 st.title("⏳ Temporal Performance Trends")
