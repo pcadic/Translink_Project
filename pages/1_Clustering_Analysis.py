@@ -54,6 +54,12 @@ if not df_all.empty:
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         stats['cluster'] = kmeans.fit_predict(X_scaled).astype(str)
 
+        # --- FIXATION DES COULEURS ---
+        # On crée une palette stable pour chaque ID de cluster (jusqu'à 5 clusters)
+        unique_clusters = sorted(stats['cluster'].unique())
+        color_palette = px.colors.qualitative.Prism # Palette moderne et distincte
+        cluster_color_map = {cluster_id: color_palette[i] for i, cluster_id in enumerate(unique_clusters)}
+
         # 3. JOINTURE
         geojson_data['name_clean'] = geojson_data['name'].str.upper().str.strip()
         stats['area_name_clean'] = stats['area_name'].str.upper().str.strip()
@@ -72,7 +78,7 @@ if not df_all.empty:
         
         with c1:
             st.subheader("🎯 Statistique")
-            fig_s = px.scatter(stats, x="mean", y="std", color="cluster", size="count", 
+            fig_s = px.scatter(stats, x="mean", y="std", color="cluster", color_discrete_map=cluster_color_map, size="count", 
                                hover_name="area_name", template="plotly_white")
             st.plotly_chart(fig_s, use_container_width=True)
 
@@ -80,7 +86,7 @@ if not df_all.empty:
             st.subheader("🗺️ Géographie")
             fig_m = px.choropleth_mapbox(
                 map_df, geojson=map_df.__geo_interface__, locations=map_df.index,
-                color="cluster", hover_name="name",
+                color="cluster", color_discrete_map=cluster_color_map, hover_name="name",
                 mapbox_style="carto-positron", center={"lat": 49.25, "lon": -123.12},
                 zoom=9, opacity=0.7
             )
