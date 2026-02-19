@@ -20,17 +20,26 @@ def load_temporal_data():
         response = supabase.table("bus_positions").select("recorded_time, delay_seconds, area_name").execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
-            # 1. Convert to datetime
+            # 1. Ensure we are working with datetime objects
             df['recorded_time'] = pd.to_datetime(df['recorded_time'])
             
-            # 2. Force conversion to Vancouver Time (PST)
-            # This shifts the UTC time to local time
-            df['recorded_time'] = df['recorded_time'].dt.tz_localize('UTC').dt.tz_convert('America/Vancouver')
+            # 2. Most databases store in UTC. 
+            # We localize to UTC first, then convert to Vancouver (PST/PDT)
+            try:
+                # If the data already has timezone info
+                df['recorded_time'] = df['recorded_time'].dt.tz_convert('America/Vancouver')
+            except TypeError:
+                # If the data is "timezone naive" (common with some DB drivers)
+                df['recorded_time'] = df['recorded_time'].dt.tz_localize('UTC').dt.tz_convert('America/Vancouver')
             
             df['delay_min'] = df['delay_seconds'] / 60
             
-            # 3. Now the hour will be correct!
+            # 3. Extract the hour from the CONVERTED time
             df['hour'] = df['recorded_time'].dt.hour
+            
+            # Optional: Add a 'Time Label' for the hover tooltips (e.g., "5:00 PM")
+            df['time_label'] = df['recorded_time'].dt.strftime('%I:%M %p')
+            
             return df
     except Exception as e:
         st.error(f"Database error: {e}")
