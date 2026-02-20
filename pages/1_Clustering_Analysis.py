@@ -20,14 +20,16 @@ supabase = init_connection()
 @st.cache_data(ttl=600)
 def load_clustering_data():
     try:
-        # Fetching historical data for Machine Learning analysis
+        # We now fetch all rows to give the AI more history to learn from
         response = supabase.table("bus_positions").select("area_name, delay_seconds").execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
             df['delay_min'] = df['delay_seconds'] / 60
+            # Remove extreme outliers that break K-Means (e.g., GPS glitches > 1hr)
+            df = df[df['delay_min'] < 60]
             return df
     except Exception as e:
-        st.error(f"Database connection error: {e}")
+        st.error(f"Database error: {e}")
     return pd.DataFrame()
 
 @st.cache_data
