@@ -1,29 +1,20 @@
-import streamlit as st
+import st
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 import plotly.express as px
 from supabase import create_client
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="TransLink Performance Dashboard", page_icon="🚌", layout="wide")
+st.set_page_config(page_title="TransLink Live Dashboard", page_icon="🚌", layout="wide")
 
-# --- CONNEXION ---
+# --- CONNECTION ---
 @st.cache_resource
 def init_connection():
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 supabase = init_connection()
 
-# --- FONCTION DE COLORATION HARMONISÉE ---
-def get_color_gradient(values):
-    """Génère un dégradé Vert (avance) -> Jaune (neutre) -> Rouge (retard)"""
-    if len(values) == 0: return []
-    norm = mcolors.TwoSlopeNorm(vcenter=0, vmin=min(min(values), -0.1), vmax=max(max(values), 2.0))
-    return [plt.cm.RdYlGn_r(norm(val)) for val in values]
-
-# --- CHARGEMENT DES DONNÉES ---
-@st.cache_data(ttl=300)
+# --- DATA LOADING ---
+@st.cache_data(ttl=0) # Set to 0 to see your manual runs immediately
 def load_data():
     try:
         response = supabase.table("bus_positions").select("*").execute()
@@ -31,145 +22,78 @@ def load_data():
         if not df.empty:
             df['recorded_time'] = pd.to_datetime(df['recorded_time'])
             
-            # Standardized Timezone Logic
+            # Standardized Timezone Logic (UTC -> Vancouver)
             if df['recorded_time'].dt.tz is None:
                 df['recorded_time'] = df['recorded_time'].dt.tz_localize('UTC')
             df['recorded_time_local'] = df['recorded_time'].dt.tz_convert('America/Vancouver')
             
+            df['hour'] = df['recorded_time_local'].dt.hour
             df['delay_min'] = df['delay_seconds'] / 60
+            
+            # FIX: Remove "South Africa" / Invalid coordinates
+            # Vancouver is roughly Lat 49, Lon -123
+            df = df[(df['latitude'] > 45) & (df['latitude'] < 55) & 
+                    (df['longitude'] > -130) & (df['longitude'] < -120)]
+            
+            # FIX: Filter out the "City" level if a "Neighborhood" level exists 
+            # This prevents 'Vancouver' from being compared to 'Marpole'
+            df = df[df['area_type'] == 'neighborhood']
+            
             return df
-    except Exception:
+    except Exception as e:
+        st.error(f"Error: {e}")
         return pd.DataFrame()
     return pd.DataFrame()
 
-raw_df = load_data()
+st.title("🚌 TransLink Real-Time Performance")
 
-# --- INTERFACE ---
-if not raw_df.empty:
-    # --- FILTRES (SIDEBAR) ---
-    st.sidebar.header("⚙️ Filters")
-    cities = sorted(raw_df['municipality'].unique())
-    sel_cities = st.sidebar.multiselect("Cities", cities, default=cities)
-    
-    df_temp = raw_df[raw_df['municipality'].isin(sel_cities)]
-    areas = sorted(df_temp['area_name'].unique())
-    sel_areas = st.sidebar.multiselect("Neighborhoods", areas, default=areas)
-    
-    df = df_temp[df_temp['area_name'].isin(sel_areas)].copy()
+df = load_data()
 
-    st.title("📊 TransLink Performance Dashboard")
+if not df.empty:
+    # --- METRICS BAR ---
+    avg_delay = df['delay_min'].mean()
+    total_buses = len(df)
+    worst_area = df.groupby('area_name')['delay_min'].mean().idxmax()
 
-    # --- SECTION 1: KPIs ---
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Buses On-Grid", df['vehicle_no'].nunique())
-    c2.metric("Punctuality", f"{(df['delay_min'].between(-1, 3)).mean()*100:.1f}%")
-    c3.metric("Avg Delay", f"{df['delay_min'].mean():.2f} min")
-    
-    route_stats = df.groupby('route_no')['delay_min'].mean().sort_values(ascending=False)
-    c4.metric("Slowest Route", f"R.{route_stats.idxmax()}" if not route_stats.empty else "N/A")
-    
-    area_stats = df.groupby('area_name')['delay_min'].mean().sort_values(ascending=False)
-    c5.metric("Critical Zone", area_stats.idxmax() if not area_stats.empty else "N/A")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Buses Tracked", total_buses)
+    m2.metric("Avg System Delay", f"{avg_delay:.1f} min")
+    m3.metric("Worst Neighborhood", worst_area)
 
+    # --- MAP & CHART ---
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.subheader("📍 Live Bus Positions")
+        fig_map = px.scatter_mapbox(
+            df, lat="latitude", lon="longitude", color="delay_min",
+            hover_name="area_name", size_max=15, zoom=10,
+            mapbox_style="carto-positron",
+            color_continuous_scale="RdYlGn_r",
+            title="Real-time Delay Distribution"
+        )
+        st.plotly_chart(fig_map, use_container_width=True)
+
+    with col2:
+        st.subheader("📊 Top Delays by Neighborhood")
+        # Aggregating by neighborhood
+        neigh_avg = df.groupby('area_name')['delay_min'].mean().sort_values(ascending=False).head(15)
+        st.bar_chart(neigh_avg)
+
+    # --- HOURLY TRENDS ---
     st.markdown("---")
-
-    # --- SECTION 2: TOP 10 ROUTES (LARGEUR TOTALE) ---
-    st.subheader("🏆 Top 10 Most Delayed Routes")
-    if not route_stats.empty:
-        top_routes = route_stats.head(10).sort_values(ascending=True)
-        fig_r, ax_r = plt.subplots(figsize=(15, 5))
-        ax_r.barh(top_routes.index.astype(str), top_routes.values, color=get_color_gradient(top_routes.values))
-        ax_r.set_xlabel("Delay (min)")
-        st.pyplot(fig_r)
-
-    st.markdown("---")
-
-    # --- SECTION 3: CITIES & NEIGHBORHOODS (CÔTE À CÔTE) ---
-    col_v, col_n = st.columns(2)
-
-    with col_v:
-        st.subheader("🏙️ Delay by City")
-        city_avg = df.groupby('municipality')['delay_min'].mean().sort_values(ascending=True)
-        if not city_avg.empty:
-            fig_v, ax_v = plt.subplots(figsize=(10, 8))
-            ax_v.barh(city_avg.index, city_avg.values, color=get_color_gradient(city_avg.values))
-            ax_v.set_xlabel("Delay (min)")
-            st.pyplot(fig_v)
-
-    with col_n:
-        st.subheader("🏘️ Delay by Neighborhood")
-        top_neighborhoods = area_stats.head(20).sort_values(ascending=True)
-        if not top_neighborhoods.empty:
-            fig_n, ax_n = plt.subplots(figsize=(10, 8))
-            ax_n.barh(top_neighborhoods.index, top_neighborhoods.values, color=get_color_gradient(top_neighborhoods.values))
-            ax_n.axvline(0, color='black', linewidth=0.8)
-            ax_n.set_xlabel("Delay (min)")
-            st.pyplot(fig_n)
-
-    # --- SECTION 4: TEMPOREL ---
-    st.markdown("---")
-    st.subheader("⏰ Hourly Delay Trends (Vancouver Time)")
-    df['hour'] = df['recorded_time_local'].dt.hour
+    st.subheader("⏳ Hourly Delay Trends (Vancouver Time)")
     hourly_trend = df.groupby('hour')['delay_min'].mean().reset_index()
-    fig_t, ax_t = plt.subplots(figsize=(15, 4))
-    ax_t.plot(hourly_trend['hour'], hourly_trend['delay_min'], marker='o', color='#1f77b4', linewidth=2)
-    ax_t.set_xticks(range(0, 24))
-    ax_t.grid(True, alpha=0.2)
-    st.pyplot(fig_t)
-
-    # --- SECTION 5: CARTES ---
-    st.markdown("---")
-    st.subheader("📍 Real-Time Bus Positions")
-    st.map(df[['latitude', 'longitude']])
-
-    st.subheader("🔥 Congestion Heatmap")
-    fig_heat = px.density_mapbox(df, lat='latitude', lon='longitude', z='delay_min', 
-                                 radius=15, center=dict(lat=49.25, lon=-123.12), zoom=9,
-                                 mapbox_style="carto-positron", height=600)
-    st.plotly_chart(fig_heat, use_container_width=True)
-
     
-    # --- SECTION : ANALYSE DE LA VOLATILITÉ (INTERACTIVE) ---
-    st.markdown("---")
-    st.subheader("📊 Neighborhood Volatility Analysis")
+    fig_line = px.line(
+        hourly_trend, x='hour', y='delay_min', markers=True,
+        labels={'hour': 'Hour of Day (24h)', 'delay_min': 'Avg Delay (min)'},
+        template="plotly_white"
+    )
+    fig_line.update_xaxes(range=[0, 23], dtick=1)
+    st.plotly_chart(fig_line, use_container_width=True)
     
-    if not df.empty:
-        # Calcul des stats par quartier
-        volatility = df.groupby('area_name')['delay_min'].agg(['mean', 'std', 'count']).reset_index()
-        # On garde les quartiers avec au moins 3 relevés pour que l'écart-type ait du sens
-        volatility = volatility[volatility['count'] >= 3].dropna()
-    
-        if not volatility.empty:
-            # Création du graphique interactif avec Plotly
-            fig_vol = px.scatter(
-                volatility, 
-                x="mean", 
-                y="std",
-                size="count", # La taille du point dépend du nombre de bus observés
-                color="mean", # La couleur dépend du retard moyen
-                hover_name="area_name", # Affiche le nom du quartier au survol
-                labels={
-                    "mean": "Average Delay (min)",
-                    "std": "Delay Variation (Volatility)",
-                    "count": "Number of Records"
-                },
-                color_continuous_scale="RdYlGn_r", # Notre fameux dégradé vert-rouge
-                title="Stability vs. Delay by Neighborhood"
-            )
-    
-            # Amélioration du design
-            fig_vol.update_layout(
-                plot_bgcolor="rgba(0,0,0,0)",
-                xaxis=dict(gridcolor='lightgrey'),
-                yaxis=dict(gridcolor='lightgrey')
-            )
-    
-            st.plotly_chart(fig_vol, use_container_width=True)
-            
-            st.info("💡 **How to read this?** Points on the **top-right** are your problem zones: they are both slow and unpredictable. Points on the **bottom-left** are your gold standard: fast and reliable.")
-        else:
-            st.write("Not enough data points yet to calculate volatility.")
-
+    st.write(f"ℹ️ Currently showing data from {df['recorded_time_local'].min().strftime('%H:%M')} to {df['recorded_time_local'].max().strftime('%H:%M')}")
 
 else:
-    st.warning("No data found. Check your database or run the scraper.")
+    st.warning("No data found. Please run your fetch script and clear the database rows first if starting over.")
