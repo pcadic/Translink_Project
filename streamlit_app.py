@@ -30,8 +30,13 @@ def load_data():
         df = pd.DataFrame(response.data)
         if not df.empty:
             df['recorded_time'] = pd.to_datetime(df['recorded_time'])
+            
+            # Standardized Timezone Logic
+            if df['recorded_time'].dt.tz is None:
+                df['recorded_time'] = df['recorded_time'].dt.tz_localize('UTC')
+            df['recorded_time_local'] = df['recorded_time'].dt.tz_convert('America/Vancouver')
+            
             df['delay_min'] = df['delay_seconds'] / 60
-            df['recorded_time_local'] = df['recorded_time'].dt.tz_localize('UTC').dt.tz_convert('America/Vancouver')
             return df
     except Exception:
         return pd.DataFrame()
