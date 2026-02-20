@@ -173,6 +173,9 @@ if not df.empty:
     st.markdown("---")
     st.subheader("⏳ Hourly Delay Trends (Vancouver Time)")
 
+    st.write(df["hour_bucket"].unique())
+    st.write(df.groupby("hour_bucket").size())
+
     hourly_trend = (
         df.groupby("hour_bucket")["delay_min"]
         .mean()
