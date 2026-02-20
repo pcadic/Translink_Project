@@ -17,9 +17,15 @@ supabase = init_connection()
 @st.cache_data(ttl=0) 
 def load_dashboard_data():
     try:
-        # MANDATORY FIX: Increased limit to 10,000 to ensure 17h and 19h batches are both loaded.
-        # This is why 19h was disappearing: Supabase defaults to 1,000 rows.
-        response = supabase.table("bus_positions").select("*").limit(10000).execute()
+        # FIX 1: Ensure ordering so all runs are loaded chronologically
+        response = (
+            supabase
+            .table("bus_positions")
+            .select("*")
+            .order("recorded_time", desc=False)
+            .execute()
+        )
+
         df = pd.DataFrame(response.data)
         
         if not df.empty:
@@ -30,10 +36,11 @@ def load_dashboard_data():
                 df['recorded_time'] = df['recorded_time'].dt.tz_localize('UTC')
             df['recorded_time_local'] = df['recorded_time'].dt.tz_convert('America/Vancouver')
             
-            df['hour'] = df['recorded_time_local'].dt.hour
+            # FIX 2: Proper hour bucket (not just hour number)
+            df['hour_bucket'] = df['recorded_time_local'].dt.floor('H')
             df['delay_min'] = df['delay_seconds'] / 60
             
-            # GEOFENCE: Keep only Vancouver Frame
+            # GEOFENCE
             df = df[(df['latitude'] > 48.0) & (df['latitude'] < 50.0) & 
                     (df['longitude'] > -124.0) & (df['longitude'] < -122.0)]
             
@@ -47,7 +54,8 @@ st.title("🚌 TransLink Performance Dashboard")
 df = load_dashboard_data()
 
 if not df.empty:
-    # --- 5 KPIs (RESTORED EXACTLY) ---
+
+    # --- KPIs ---
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Buses On-Grid", df['vehicle_no'].nunique())
     c2.metric("Punctuality", f"{(df['delay_min'].between(-1, 3)).mean()*100:.1f}%")
@@ -65,13 +73,16 @@ if not df.empty:
         hover_name="area_name", size_max=10, zoom=10,
         mapbox_style="carto-positron",
         color_continuous_scale="RdYlGn_r",
-        color_continuous_midpoint=0, # FORCE GREEN FOR NEGATIVE
-        range_color=[-3, 5] 
+        color_continuous_midpoint=0
     )
     fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
     st.plotly_chart(fig_map, use_container_width=True)
 
-    # --- HORIZONTAL GRADIENT BARS (FIXED COLORS) ---
+    # --- DYNAMIC COLOR RANGE ---
+    max_delay = df['delay_min'].max()
+    min_delay = df['delay_min'].min()
+    range_max = max(abs(max_delay), abs(min_delay))
+
     st.markdown("---")
     col1, col2 = st.columns(2)
 
@@ -79,9 +90,12 @@ if not df.empty:
         st.subheader("🏙️ Top Delays by City")
         city_avg = df[df['area_type'] == 'municipality'].groupby('area_name')['delay_min'].mean().sort_values(ascending=True)
         fig_city = px.bar(
-            city_avg, orientation='h', color=city_avg.values,
-            color_continuous_scale="RdYlGn_r", 
-            color_continuous_midpoint=0, # FIXED: ANYTHING BELOW 0 IS GREEN
+            city_avg,
+            orientation='h',
+            color=city_avg.values,
+            color_continuous_scale="RdYlGn_r",
+            range_color=[-range_max, range_max],
+            color_continuous_midpoint=0,
             labels={'value': 'Avg Delay (min)', 'area_name': 'City'}
         )
         fig_city.update_layout(showlegend=False, coloraxis_showscale=False)
@@ -91,29 +105,36 @@ if not df.empty:
         st.subheader("🏘️ Top Delays by Neighborhood")
         neigh_avg = df[df['area_type'] == 'neighborhood'].groupby('area_name')['delay_min'].mean().sort_values(ascending=True).tail(15)
         fig_neigh = px.bar(
-            neigh_avg, orientation='h', color=neigh_avg.values,
-            color_continuous_scale="RdYlGn_r", 
-            color_continuous_midpoint=0, # FIXED: ANYTHING BELOW 0 IS GREEN
+            neigh_avg,
+            orientation='h',
+            color=neigh_avg.values,
+            color_continuous_scale="RdYlGn_r",
+            range_color=[-range_max, range_max],
+            color_continuous_midpoint=0,
             labels={'value': 'Avg Delay (min)', 'area_name': 'Neighborhood'}
         )
         fig_neigh.update_layout(showlegend=False, coloraxis_showscale=False)
         st.plotly_chart(fig_neigh, use_container_width=True)
 
-    # --- HOURLY TRENDS (FIXED: SHOWS 17H AND 19H) ---
+    # --- HOURLY TRENDS ---
     st.markdown("---")
     st.subheader("⏳ Hourly Delay Trends (Vancouver Time)")
     
-    # We aggregate by hour to ensure we see the progression from 17:00 to 19:00
-    hourly_trend = df.groupby('hour')['delay_min'].mean().reset_index()
+    hourly_trend = (
+        df.groupby('hour_bucket')['delay_min']
+          .mean()
+          .reset_index()
+    )
     
     fig_line = px.line(
-        hourly_trend, x='hour', y='delay_min', markers=True,
-        labels={'hour': 'Hour of Day (24h)', 'delay_min': 'Avg Delay (min)'},
+        hourly_trend,
+        x='hour_bucket',
+        y='delay_min',
+        markers=True,
+        labels={'hour_bucket': 'Time', 'delay_min': 'Avg Delay (min)'},
         template="plotly_white"
     )
-    # Ensure the X axis shows the full day so the points aren't squashed
-    fig_line.update_xaxes(range=[0, 23], dtick=1)
-    fig_line.update_traces(line_color='#ef4444', line_width=3)
+    
     st.plotly_chart(fig_line, use_container_width=True)
 
 else:
