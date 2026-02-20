@@ -5,7 +5,7 @@ import geopandas as gpd
 from google.transit import gtfs_realtime_pb2
 from shapely.geometry import Point
 from supabase import create_client
-from datetime import datetime
+from datetime import datetime, timezone  # Added timezone here
 
 # --- CONFIGURATION ---
 TRANSLINK_API_KEY = os.environ.get('TRANSLINK_API_KEY')
@@ -24,6 +24,11 @@ def get_feed(endpoint):
 
 def run_pipeline():
     print("--- DEBUT DU PIPELINE ---")
+    
+    # Capture the exact moment of the fetch in UTC
+    # This is the "Gold Standard" for time-series data
+    fetch_time_utc = datetime.now(timezone.utc).isoformat()
+    
     bus_batch = []
     alerts_batch = []
 
@@ -35,23 +40,14 @@ def run_pipeline():
         
         # 2. TRAITEMENT DES ALERTES
         print(f"Analyse de {len(rt_feed.entity)} entités pour les alertes...")
-        alert_count_found = 0 # Compteur de diagnostic
         for entity in rt_feed.entity:
             if entity.HasField('alert'):
-                alert_count_found += 1
                 a = entity.alert
-                
-                # Extraction sécurisée des textes
                 h_text = a.header_text.translation[0].text if a.header_text.translation else "No Header"
                 d_text = a.description_text.translation[0].text if a.description_text.translation else "No Description"
-                
-                # Extraction RouteID
                 r_id = a.informed_entity[0].route_id if a.informed_entity else None
                 
-                # Dates
-                s_time = datetime.fromtimestamp(a.active_period[0].start).isoformat() if a.active_period else None
-                e_time = datetime.fromtimestamp(a.active_period[0].end).isoformat() if a.active_period and a.active_period[0].end < 2147483647 else None
-
+                # We use fetch_time_utc for created_at to keep it consistent
                 alerts_batch.append({
                     "alert_id": str(entity.id),
                     "route_id": r_id,
@@ -59,11 +55,8 @@ def run_pipeline():
                     "description_text": d_text,
                     "cause": str(a.cause) if a.cause else "UNKNOWN_CAUSE",
                     "effect": str(a.effect) if a.effect else "UNKNOWN_EFFECT",
-                    "start_time": s_time,
-                    "end_time": e_time,
-                    "created_at": datetime.now().isoformat()
+                    "created_at": fetch_time_utc 
                 })
-        print(f"DEBUG: Nombre d'alertes réelles détectées dans le flux: {alert_count_found}")
         
         # 3. TRAITEMENT DES BUS (GEOSPATIAL)
         print("Chargement du GeoJSON et traitement des bus...")
@@ -71,7 +64,6 @@ def run_pipeline():
         neighborhoods = gdf[gdf['area_type'] == 'neighborhood']
         municipalities = gdf[gdf['area_type'] == 'municipality']
 
-        # Mapping des délais
         delays = {ent.trip_update.trip.trip_id: ent.trip_update.stop_time_update[0].arrival.delay 
                   for ent in rt_feed.entity if ent.HasField('trip_update') and ent.trip_update.stop_time_update}
 
@@ -101,7 +93,8 @@ def run_pipeline():
                     "area_type": "neighborhood" if neigh_name else "municipality",
                     "municipality": city_name,
                     "delay_seconds": delays.get(v.trip.trip_id, 0),
-                    "recorded_time": pd.to_datetime(v.timestamp, unit='s').isoformat()
+                    # UPDATED: Using the standardized fetch time
+                    "recorded_time": fetch_time_utc
                 })
 
         # 4. ENVOI SUPABASE
@@ -113,7 +106,7 @@ def run_pipeline():
             print(f"Envoi de {len(bus_batch)} positions de bus...")
             supabase.table("bus_positions").insert(bus_batch).execute()
 
-        print("--- PIPELINE TERMINE AVEC SUCCÈS ---")
+        print(f"--- PIPELINE TERMINE : {len(bus_batch)} positions enregistrées à {fetch_time_utc} ---")
 
     except Exception as e:
         print(f"❌ ERREUR CRITIQUE : {e}")
