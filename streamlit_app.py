@@ -17,7 +17,8 @@ supabase = init_connection()
 @st.cache_data(ttl=0) 
 def load_dashboard_data():
     try:
-        # FIX: Increased limit to 10,000 to ensure 17h and 19h batches are both loaded
+        # MANDATORY FIX: Increased limit to 10,000 to ensure 17h and 19h batches are both loaded.
+        # This is why 19h was disappearing: Supabase defaults to 1,000 rows.
         response = supabase.table("bus_positions").select("*").limit(10000).execute()
         df = pd.DataFrame(response.data)
         
@@ -46,7 +47,7 @@ st.title("🚌 TransLink Performance Dashboard")
 df = load_dashboard_data()
 
 if not df.empty:
-    # --- 5 KPIs (EXACTLY AS COPIED) ---
+    # --- 5 KPIs (RESTORED EXACTLY) ---
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Buses On-Grid", df['vehicle_no'].nunique())
     c2.metric("Punctuality", f"{(df['delay_min'].between(-1, 3)).mean()*100:.1f}%")
@@ -58,19 +59,19 @@ if not df.empty:
     area_stats = df.groupby('area_name')['delay_min'].mean()
     c5.metric("Critical Zone", area_stats.idxmax() if not area_stats.empty else "N/A")
 
-    # --- MAP (NO TITLE) ---
+    # --- MAP ---
     fig_map = px.scatter_mapbox(
         df, lat="latitude", lon="longitude", color="delay_min",
         hover_name="area_name", size_max=10, zoom=10,
         mapbox_style="carto-positron",
         color_continuous_scale="RdYlGn_r",
-        color_continuous_midpoint=0, # GREEN FOR ADVANCE
+        color_continuous_midpoint=0, # FORCE GREEN FOR NEGATIVE
         range_color=[-3, 5] 
     )
     fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
     st.plotly_chart(fig_map, use_container_width=True)
 
-    # --- HORIZONTAL GRADIENT BARS (GREEN/RED) ---
+    # --- HORIZONTAL GRADIENT BARS (FIXED COLORS) ---
     st.markdown("---")
     col1, col2 = st.columns(2)
 
@@ -80,7 +81,7 @@ if not df.empty:
         fig_city = px.bar(
             city_avg, orientation='h', color=city_avg.values,
             color_continuous_scale="RdYlGn_r", 
-            color_continuous_midpoint=0, # FIXED: GREEN FOR NEGATIVE
+            color_continuous_midpoint=0, # FIXED: ANYTHING BELOW 0 IS GREEN
             labels={'value': 'Avg Delay (min)', 'area_name': 'City'}
         )
         fig_city.update_layout(showlegend=False, coloraxis_showscale=False)
@@ -92,15 +93,17 @@ if not df.empty:
         fig_neigh = px.bar(
             neigh_avg, orientation='h', color=neigh_avg.values,
             color_continuous_scale="RdYlGn_r", 
-            color_continuous_midpoint=0, # FIXED: GREEN FOR NEGATIVE
+            color_continuous_midpoint=0, # FIXED: ANYTHING BELOW 0 IS GREEN
             labels={'value': 'Avg Delay (min)', 'area_name': 'Neighborhood'}
         )
         fig_neigh.update_layout(showlegend=False, coloraxis_showscale=False)
         st.plotly_chart(fig_neigh, use_container_width=True)
 
-    # --- HOURLY TRENDS (FIXED: 17H AND 19H CONNECTED) ---
+    # --- HOURLY TRENDS (FIXED: SHOWS 17H AND 19H) ---
     st.markdown("---")
     st.subheader("⏳ Hourly Delay Trends (Vancouver Time)")
+    
+    # We aggregate by hour to ensure we see the progression from 17:00 to 19:00
     hourly_trend = df.groupby('hour')['delay_min'].mean().reset_index()
     
     fig_line = px.line(
@@ -108,9 +111,10 @@ if not df.empty:
         labels={'hour': 'Hour of Day (24h)', 'delay_min': 'Avg Delay (min)'},
         template="plotly_white"
     )
+    # Ensure the X axis shows the full day so the points aren't squashed
     fig_line.update_xaxes(range=[0, 23], dtick=1)
     fig_line.update_traces(line_color='#ef4444', line_width=3)
     st.plotly_chart(fig_line, use_container_width=True)
 
 else:
-    st.warning("No data found. Ensure the scraper has run.")
+    st.warning("No data found. Ensure your fetcher script is uploading to Supabase.")
