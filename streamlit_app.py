@@ -29,7 +29,7 @@ def load_dashboard_data():
             .table("bus_positions")
             .select("*")
             .order("recorded_time", desc=False)
-            .range(0, 10000)  # pagination explicite
+            .range(0, 10000)  # Explicit pagination (important)
             .execute()
         )
 
@@ -38,20 +38,15 @@ def load_dashboard_data():
         if not df.empty:
             df["recorded_time"] = pd.to_datetime(df["recorded_time"])
 
-            # Ensure UTC awareness
             if df["recorded_time"].dt.tz is None:
                 df["recorded_time"] = df["recorded_time"].dt.tz_localize("UTC")
 
-            # Convert to Vancouver time
             df["recorded_time_local"] = df["recorded_time"].dt.tz_convert("America/Vancouver")
 
-            # Proper hour bucket
-            df["hour_bucket"] = df["recorded_time_local"].dt.floor("H")
+            df["hour_bucket"] = df["recorded_time_local"].dt.strftime("%Y-%m-%d %H:00")
 
-            # Delay in minutes
             df["delay_min"] = df["delay_seconds"] / 60
 
-            # GEOFENCE
             df = df[
                 (df["latitude"] > 48.0) & (df["latitude"] < 50.0) &
                 (df["longitude"] > -124.0) & (df["longitude"] < -122.0)
@@ -92,39 +87,32 @@ if not df.empty:
         color="delay_min",
         hover_name="area_name",
         zoom=10,
-        mapbox_style="carto-positron",  
-        color_continuous_scale=[
-            [0.0, "#006400"],   # dark green (big advance)
-            [0.25, "#00cc00"],  # green
-            [0.5, "#ffffcc"],   # near zero
-            [0.75, "#ff9900"],  # orange
-            [1.0, "#cc0000"]    # dark red (big delay)
-        ],
+        color_continuous_scale="RdYlGn_r",
         color_continuous_midpoint=0
     )
 
-
-   fig_map.update_layout(
+    fig_map.update_layout(
+        mapbox_style="carto-positron",
+        paper_bgcolor="#0f172a",   # subtle navy
+        plot_bgcolor="#0f172a",
         margin={"r": 0, "t": 0, "l": 0, "b": 0},
         height=500
     )
 
-    fig_map.update_layout(
-        mapbox=dict(
-            style="carto-positron",
-            center=dict(lat=49.25, lon=-123.1),
-            zoom=10
-            ),
-        paper_bgcolor="#0f172a",
-        plot_bgcolor="#0f172a"
-    )
-
     st.plotly_chart(fig_map, use_container_width=True)
 
-    # --- COLOR RANGE FOR BARS ---
+    # --- COLOR RANGE ---
     max_delay = df["delay_min"].max()
     min_delay = df["delay_min"].min()
     range_max = max(abs(max_delay), abs(min_delay))
+
+    custom_scale = [
+        [0.0, "#006400"],   # dark green
+        [0.25, "#00cc00"],  # green
+        [0.5, "#ffffcc"],   # near zero
+        [0.75, "#ff9900"],  # orange
+        [1.0, "#cc0000"]    # dark red
+    ]
 
     st.markdown("---")
     col1, col2 = st.columns(2)
@@ -147,15 +135,8 @@ if not df.empty:
             y="area_name",
             orientation="h",
             color="delay_min",
-            color_continuous_scale=[
-                [0.0, "#006400"],   # dark green (big advance)
-                [0.25, "#00cc00"],  # green
-                [0.5, "#ffffcc"],   # near zero
-                [0.75, "#ff9900"],  # orange
-                [1.0, "#cc0000"]    # dark red (big delay)
-            ],
+            color_continuous_scale=custom_scale,
             range_color=[-range_max, range_max],
-            color_continuous_midpoint=0,
             labels={
                 "delay_min": "Avg Delay (min)",
                 "area_name": "City"
@@ -184,15 +165,8 @@ if not df.empty:
             y="area_name",
             orientation="h",
             color="delay_min",
-            color_continuous_scale=[
-                [0.0, "#006400"],   # dark green (big advance)
-                [0.25, "#00cc00"],  # green
-                [0.5, "#ffffcc"],   # near zero
-                [0.75, "#ff9900"],  # orange
-                [1.0, "#cc0000"]    # dark red (big delay)
-            ],
+            color_continuous_scale=custom_scale,
             range_color=[-range_max, range_max],
-            color_continuous_midpoint=0,
             labels={
                 "delay_min": "Avg Delay (min)",
                 "area_name": "Neighborhood"
@@ -203,27 +177,30 @@ if not df.empty:
         st.plotly_chart(fig_neigh, use_container_width=True)
 
     # --- HOURLY TREND ---
+    st.markdown("---")
     st.subheader("⏳ Hourly Delay Trends (Vancouver Time)")
-    
-    df["hour_bucket"] = df["recorded_time_local"].dt.strftime("%Y-%m-%d %H:00")
-    
+
     hourly_trend = (
         df.groupby("hour_bucket")["delay_min"]
         .mean()
         .reset_index()
         .sort_values("hour_bucket")
     )
-    
+
     fig_line = px.line(
         hourly_trend,
         x="hour_bucket",
         y="delay_min",
         markers=True,
+        labels={
+            "hour_bucket": "Time",
+            "delay_min": "Avg Delay (min)"
+        },
         template="plotly_white"
     )
-    
+
     fig_line.update_traces(line_width=3)
-    
+
     st.plotly_chart(fig_line, use_container_width=True)
 
 else:
