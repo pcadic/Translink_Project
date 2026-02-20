@@ -89,7 +89,7 @@ if not df.empty:
         hover_name="area_name",
         zoom=10,
         mapbox_style="carto-positron",
-        color_continuous_scale==custom_scale,
+        color_continuous_scale=custom_scale,
         color_continuous_midpoint=0
     )
     
