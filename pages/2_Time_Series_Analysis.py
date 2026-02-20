@@ -47,6 +47,11 @@ st.title("⏳ Temporal Performance Trends")
 st.markdown("This page tracks how bus delays change across different hours in Vancouver.")
 
 df = load_temporal_data()
+st.write("### 🚨 Latest 10 Records in Database")
+if not df.empty:
+    st.dataframe(df[['recorded_time', 'hour', 'area_name']].sort_values('recorded_time', ascending=False).head(10))
+else:
+    st.write("The dataframe is empty!")
 
 if not df.empty:
     # --- GLOBAL SYSTEM TREND ---
