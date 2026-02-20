@@ -17,15 +17,14 @@ supabase = init_connection()
 @st.cache_data(ttl=0) 
 def load_dashboard_data():
     try:
-        # FIX: Increased limit to 10,000 to capture 17h, 19h, and all future batches
-        # Otherwise, it only sees the first batch (approx 1000 rows)
+        # FIX: Increased limit to 10,000 to ensure 17h and 19h batches are both loaded
         response = supabase.table("bus_positions").select("*").limit(10000).execute()
         df = pd.DataFrame(response.data)
         
         if not df.empty:
             df['recorded_time'] = pd.to_datetime(df['recorded_time'])
             
-            # Standardized Timezone Logic (UTC -> Vancouver)
+            # Vancouver Timezone Logic
             if df['recorded_time'].dt.tz is None:
                 df['recorded_time'] = df['recorded_time'].dt.tz_localize('UTC')
             df['recorded_time_local'] = df['recorded_time'].dt.tz_convert('America/Vancouver')
@@ -33,13 +32,13 @@ def load_dashboard_data():
             df['hour'] = df['recorded_time_local'].dt.hour
             df['delay_min'] = df['delay_seconds'] / 60
             
-            # GEOFENCE: Keep only Vancouver area buses
+            # GEOFENCE: Keep only Vancouver Frame
             df = df[(df['latitude'] > 48.0) & (df['latitude'] < 50.0) & 
                     (df['longitude'] > -124.0) & (df['longitude'] < -122.0)]
             
             return df
     except Exception as e:
-        st.error(f"Error loading data: {e}")
+        st.error(f"Error: {e}")
     return pd.DataFrame()
 
 st.title("🚌 TransLink Performance Dashboard")
@@ -47,72 +46,61 @@ st.title("🚌 TransLink Performance Dashboard")
 df = load_dashboard_data()
 
 if not df.empty:
-    # --- THE 5 KPIs (EXACTLY AS YOU REQUESTED) ---
+    # --- 5 KPIs (EXACTLY AS COPIED) ---
     c1, c2, c3, c4, c5 = st.columns(5)
-    
-    # KPI 1: Buses On-Grid
     c1.metric("Buses On-Grid", df['vehicle_no'].nunique())
-    
-    # KPI 2: Punctuality
     c2.metric("Punctuality", f"{(df['delay_min'].between(-1, 3)).mean()*100:.1f}%")
-    
-    # KPI 3: Avg Delay
     c3.metric("Avg Delay", f"{df['delay_min'].mean():.2f} min")
     
-    # KPI 4: Slowest Route
     route_stats = df.groupby('route_no')['delay_min'].mean().sort_values(ascending=False)
     c4.metric("Slowest Route", f"R.{route_stats.idxmax()}" if not route_stats.empty else "N/A")
     
-    # KPI 5: Critical Zone
     area_stats = df.groupby('area_name')['delay_min'].mean()
     c5.metric("Critical Zone", area_stats.idxmax() if not area_stats.empty else "N/A")
 
-    # --- MAP (NO TITLE, HISTORICAL DATA) ---
+    # --- MAP (NO TITLE) ---
     fig_map = px.scatter_mapbox(
         df, lat="latitude", lon="longitude", color="delay_min",
-        hover_name="area_name", size_max=10, zoom=10.5,
+        hover_name="area_name", size_max=10, zoom=10,
         mapbox_style="carto-positron",
         color_continuous_scale="RdYlGn_r",
-        color_continuous_midpoint=0,
+        color_continuous_midpoint=0, # GREEN FOR ADVANCE
         range_color=[-3, 5] 
     )
     fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
     st.plotly_chart(fig_map, use_container_width=True)
 
-    # --- HORIZONTAL GRADIENT BAR CHARTS (RED/YELLOW/GREEN) ---
+    # --- HORIZONTAL GRADIENT BARS (GREEN/RED) ---
     st.markdown("---")
-    col_l, col_r = st.columns(2)
+    col1, col2 = st.columns(2)
 
-    with col_l:
+    with col1:
         st.subheader("🏙️ Top Delays by City")
         city_avg = df[df['area_type'] == 'municipality'].groupby('area_name')['delay_min'].mean().sort_values(ascending=True)
-        if not city_avg.empty:
-            fig_city = px.bar(
-                city_avg, orientation='h', color=city_avg.values,
-                color_continuous_scale="RdYlGn_r", 
-                color_continuous_midpoint=0, # 0 = Yellow/White, Negative = Green, Positive = Red
-                labels={'value': 'Avg Delay (min)', 'area_name': 'City'}
-            )
-            fig_city.update_layout(showlegend=False, coloraxis_showscale=False, yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_city, use_container_width=True)
+        fig_city = px.bar(
+            city_avg, orientation='h', color=city_avg.values,
+            color_continuous_scale="RdYlGn_r", 
+            color_continuous_midpoint=0, # FIXED: GREEN FOR NEGATIVE
+            labels={'value': 'Avg Delay (min)', 'area_name': 'City'}
+        )
+        fig_city.update_layout(showlegend=False, coloraxis_showscale=False)
+        st.plotly_chart(fig_city, use_container_width=True)
 
-    with col_r:
+    with col2:
         st.subheader("🏘️ Top Delays by Neighborhood")
         neigh_avg = df[df['area_type'] == 'neighborhood'].groupby('area_name')['delay_min'].mean().sort_values(ascending=True).tail(15)
-        if not neigh_avg.empty:
-            fig_neigh = px.bar(
-                neigh_avg, orientation='h', color=neigh_avg.values,
-                color_continuous_scale="RdYlGn_r", 
-                color_continuous_midpoint=0,
-                labels={'value': 'Avg Delay (min)', 'area_name': 'Neighborhood'}
-            )
-            fig_neigh.update_layout(showlegend=False, coloraxis_showscale=False, yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_neigh, use_container_width=True)
+        fig_neigh = px.bar(
+            neigh_avg, orientation='h', color=neigh_avg.values,
+            color_continuous_scale="RdYlGn_r", 
+            color_continuous_midpoint=0, # FIXED: GREEN FOR NEGATIVE
+            labels={'value': 'Avg Delay (min)', 'area_name': 'Neighborhood'}
+        )
+        fig_neigh.update_layout(showlegend=False, coloraxis_showscale=False)
+        st.plotly_chart(fig_neigh, use_container_width=True)
 
-    # --- HOURLY TRENDS (FIXED FOR MULTIPLE BATCHES) ---
+    # --- HOURLY TRENDS (FIXED: 17H AND 19H CONNECTED) ---
     st.markdown("---")
     st.subheader("⏳ Hourly Delay Trends (Vancouver Time)")
-    # Grouping by hour across all 2000+ records
     hourly_trend = df.groupby('hour')['delay_min'].mean().reset_index()
     
     fig_line = px.line(
@@ -125,4 +113,4 @@ if not df.empty:
     st.plotly_chart(fig_line, use_container_width=True)
 
 else:
-    st.warning("No data found in database. Run your fetcher script to load both batches.")
+    st.warning("No data found. Ensure the scraper has run.")
