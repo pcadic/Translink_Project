@@ -17,7 +17,8 @@ supabase = init_connection()
 @st.cache_data(ttl=0) 
 def load_dashboard_data():
     try:
-        # FIX: Explicitly set limit to 10,000 to capture 17h, 19h, and all future batches
+        # FIX: Increased limit to 10,000 to capture 17h, 19h, and all future batches
+        # Otherwise, it only sees the first batch (approx 1000 rows)
         response = supabase.table("bus_positions").select("*").limit(10000).execute()
         df = pd.DataFrame(response.data)
         
@@ -38,7 +39,7 @@ def load_dashboard_data():
             
             return df
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error loading data: {e}")
     return pd.DataFrame()
 
 st.title("🚌 TransLink Performance Dashboard")
@@ -46,7 +47,7 @@ st.title("🚌 TransLink Performance Dashboard")
 df = load_dashboard_data()
 
 if not df.empty:
-    # --- THE 5 KPIs (RESTORED FROM YOUR COPY) ---
+    # --- THE 5 KPIs (EXACTLY AS YOU REQUESTED) ---
     c1, c2, c3, c4, c5 = st.columns(5)
     
     # KPI 1: Buses On-Grid
@@ -72,12 +73,13 @@ if not df.empty:
         hover_name="area_name", size_max=10, zoom=10.5,
         mapbox_style="carto-positron",
         color_continuous_scale="RdYlGn_r",
-        range_color=[-3, 5] # Ensures negative (advance) is Green, positive is Red
+        color_continuous_midpoint=0,
+        range_color=[-3, 5] 
     )
     fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
     st.plotly_chart(fig_map, use_container_width=True)
 
-    # --- HORIZONTAL GRADIENT BAR CHARTS ---
+    # --- HORIZONTAL GRADIENT BAR CHARTS (RED/YELLOW/GREEN) ---
     st.markdown("---")
     col_l, col_r = st.columns(2)
 
@@ -88,7 +90,7 @@ if not df.empty:
             fig_city = px.bar(
                 city_avg, orientation='h', color=city_avg.values,
                 color_continuous_scale="RdYlGn_r", 
-                range_color=[-3, 5], # Center scale so negative values are Green
+                color_continuous_midpoint=0, # 0 = Yellow/White, Negative = Green, Positive = Red
                 labels={'value': 'Avg Delay (min)', 'area_name': 'City'}
             )
             fig_city.update_layout(showlegend=False, coloraxis_showscale=False, yaxis={'categoryorder':'total ascending'})
@@ -101,16 +103,16 @@ if not df.empty:
             fig_neigh = px.bar(
                 neigh_avg, orientation='h', color=neigh_avg.values,
                 color_continuous_scale="RdYlGn_r", 
-                range_color=[-3, 5], # Center scale so negative values are Green
+                color_continuous_midpoint=0,
                 labels={'value': 'Avg Delay (min)', 'area_name': 'Neighborhood'}
             )
             fig_neigh.update_layout(showlegend=False, coloraxis_showscale=False, yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig_neigh, use_container_width=True)
 
-    # --- HOURLY TRENDS ---
+    # --- HOURLY TRENDS (FIXED FOR MULTIPLE BATCHES) ---
     st.markdown("---")
     st.subheader("⏳ Hourly Delay Trends (Vancouver Time)")
-    # Since we fetch all rows, this will now show points for 17:00, 19:00, etc.
+    # Grouping by hour across all 2000+ records
     hourly_trend = df.groupby('hour')['delay_min'].mean().reset_index()
     
     fig_line = px.line(
@@ -123,4 +125,4 @@ if not df.empty:
     st.plotly_chart(fig_line, use_container_width=True)
 
 else:
-    st.warning("No data found in database. Run your fetcher script to start.")
+    st.warning("No data found in database. Run your fetcher script to load both batches.")
