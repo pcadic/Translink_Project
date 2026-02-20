@@ -14,32 +14,23 @@ def init_connection():
 supabase = init_connection()
 
 # --- DATA LOADING ---
-@st.cache_data(ttl=0) # Disabled cache to ensure your 4 PM run shows up immediately
+@st.cache_data(ttl=0)
 def load_temporal_data():
-    try:
-        # Fetching all records to reconstruct the full history
-        response = supabase.table("bus_positions") \
-            .select("recorded_time, delay_seconds, area_name") \
-            .execute()
+    # Remove filters and limits to see everything for now
+    response = supabase.table("bus_positions").select("*").execute()
+    df = pd.DataFrame(response.data)
+    
+    if not df.empty:
+        df['recorded_time'] = pd.to_datetime(df['recorded_time'])
         
-        df = pd.DataFrame(response.data)
-        if not df.empty:
-            # 1. Parse timestamps
-            df['recorded_time'] = pd.to_datetime(df['recorded_time'])
-            
-            # 2. Convert UTC to Vancouver Time (Fixes the 8-hour offset)
-            # This ensures 00:00 UTC becomes 16:00 (4 PM) PST
-            df['recorded_time'] = df['recorded_time'].dt.tz_localize('UTC').dt.tz_convert('America/Vancouver')
-            
-            # 3. Create helper columns
-            df['hour'] = df['recorded_time'].dt.hour
-            df['delay_min'] = df['delay_seconds'] / 60
-            
-            # 4. Clean outliers (delays over 1 hour are usually GPS errors)
-            df = df[df['delay_min'] < 60]
-            return df
-    except Exception as e:
-        st.error(f"Database error: {e}")
+        # DEBUG: Print the raw timezone-naive time to the console
+        # print(df['recorded_time'].iloc[0]) 
+
+        # Force conversion
+        df['recorded_time'] = df['recorded_time'].dt.tz_localize('UTC', ambiguous='infer').dt.tz_convert('America/Vancouver')
+        df['hour'] = df['recorded_time'].dt.hour
+        df['delay_min'] = df['delay_seconds'] / 60
+        return df
     return pd.DataFrame()
 
 # --- MAIN INTERFACE ---
