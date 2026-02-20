@@ -24,14 +24,7 @@ supabase = init_connection()
 @st.cache_data(ttl=0)
 def load_dashboard_data():
     try:
-        response = (
-            supabase
-            .table("bus_positions")
-            .select("*")
-            .order("recorded_time", desc=False)
-            .range(0, 10000)  # Explicit pagination (important)
-            .execute()
-        )
+        response = supabase.rpc("get_all_bus_positions").execute()
 
         df = pd.DataFrame(response.data)
 
@@ -79,6 +72,14 @@ if not df.empty:
     area_stats = df.groupby("area_name")["delay_min"].mean()
     c5.metric("Critical Zone", area_stats.idxmax() if not area_stats.empty else "N/A")
 
+    custom_scale = [
+        [0.0, "#006400"],   # dark green
+        [0.25, "#00cc00"],  # green
+        [0.5, "#ffffcc"],   # near zero
+        [0.75, "#ff9900"],  # orange
+        [1.0, "#cc0000"]    # dark red
+    ]
+
     # --- MAP ---
     fig_map = px.scatter_mapbox(
         df,
@@ -87,14 +88,12 @@ if not df.empty:
         color="delay_min",
         hover_name="area_name",
         zoom=10,
-        color_continuous_scale="RdYlGn_r",
+        mapbox_style="carto-positron",
+        color_continuous_scale==custom_scale,
         color_continuous_midpoint=0
     )
-
+    
     fig_map.update_layout(
-        mapbox_style="carto-positron",
-        paper_bgcolor="#0f172a",   # subtle navy
-        plot_bgcolor="#0f172a",
         margin={"r": 0, "t": 0, "l": 0, "b": 0},
         height=500
     )
@@ -106,13 +105,7 @@ if not df.empty:
     min_delay = df["delay_min"].min()
     range_max = max(abs(max_delay), abs(min_delay))
 
-    custom_scale = [
-        [0.0, "#006400"],   # dark green
-        [0.25, "#00cc00"],  # green
-        [0.5, "#ffffcc"],   # near zero
-        [0.75, "#ff9900"],  # orange
-        [1.0, "#cc0000"]    # dark red
-    ]
+
 
     st.markdown("---")
     col1, col2 = st.columns(2)
