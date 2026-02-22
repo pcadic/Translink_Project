@@ -190,6 +190,11 @@ if not df.empty:
             },
             template="plotly_white"
         )
+
+        fig_line.update_xaxes(
+            dtick=3600000,  # 1 heure en millisecondes
+            tickformat="%H:%M"
+        )
     
         fig_line.update_traces(line_width=3)
     
