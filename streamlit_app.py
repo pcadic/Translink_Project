@@ -238,7 +238,11 @@ if not df.empty:
     route_response = supabase.table("v_route_hourly_delay").select("*").execute()
     route_df = pd.DataFrame(route_response.data)
     
-    selected_route = st.selectbox("Select Route", route_df["route_no"].unique())
+    selected_route = st.selectbox(
+        "Select Route",
+        route_df["route_no"].unique(),
+        key="route_selector"
+    )
     
     filtered_route = route_df[route_df["route_no"] == selected_route]
     
