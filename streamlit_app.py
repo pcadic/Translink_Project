@@ -202,19 +202,58 @@ if not df.empty:
     st.plotly_chart(fig_line, use_container_width=True)
 
     # --- HOURLY TREND  - City ---
-    # Hourly Delay Trends by City
+    # Hourly Delay Trends by City #
+
     city_response = supabase.table("v_city_hourly_delay").select("*").execute()
     city_df = pd.DataFrame(city_response.data)
     
-    fig_city_trend = px.line(
-        city_df,
-        x="hour_vancouver",
-        y="avg_delay_min",
-        color="area_name",
-        markers=True
-    )
+    if not city_df.empty:
     
-    st.plotly_chart(fig_city_trend, use_container_width=True)
+        city_df["hour_vancouver"] = pd.to_datetime(city_df["hour_vancouver"])
+    
+        # 🔹 Liste des villes triées alphabétiquement
+        cities = sorted(city_df["area_name"].unique())
+    
+        # 🔹 Sélection multiple
+        selected_cities = st.multiselect(
+            "Select City/Cities",
+            cities,
+            default=cities[:1],  # optionnel : première ville sélectionnée
+            key="city_selector_multi"
+        )
+    
+        # 🔹 Filtrage
+        filtered_city = city_df[
+            city_df["area_name"].isin(selected_cities)
+        ]
+    
+        # 🔹 Graph
+        fig_city_trend = px.line(
+            filtered_city,
+            x="hour_vancouver",
+            y="avg_delay_min",
+            color="area_name",
+            markers=True,
+            labels={
+                "hour_vancouver": "Time (Vancouver)",
+                "avg_delay_min": "Avg Delay (min)",
+                "area_name": "City"
+            },
+            template="plotly_white"
+        )
+    
+        # 🔹 Axe en heures pleines
+        fig_city_trend.update_xaxes(
+            dtick=3600000,
+            tickformat="%H:%M"
+        )
+    
+        fig_city_trend.update_traces(line_width=3)
+    
+        st.plotly_chart(fig_city_trend, use_container_width=True)
+    
+    else:
+        st.info("No city-level hourly data available.")
 
 
     # --- HOURLY TREND  - Route ---
