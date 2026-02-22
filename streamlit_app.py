@@ -179,23 +179,23 @@ if not df.empty:
     if not hourly_df.empty:
         hourly_df["hour_vancouver"] = pd.to_datetime(hourly_df["hour_vancouver"])
     
-        fig_line = px.line(
-            hourly_df,
-            x="hour_vancouver",
-            y="avg_delay_min",
-            markers=True,
-            labels={
-                "hour_vancouver": "Time (Vancouver)",
-                "avg_delay_min": "Avg Delay (min)"
-            },
-            template="plotly_white"
-        )
-
-        fig_line.update_xaxes(
-            dtick=3600000,  # 1 heure en millisecondes
-            tickformat="%H:%M"
-        )
+    fig_line = px.line(
+        hourly_df,
+        x="hour_vancouver",
+        y="avg_delay_min",
+        markers=True,
+        labels={
+            "hour_vancouver": "Time (Vancouver)",
+            "avg_delay_min": "Avg Delay (min)"
+        },
+        template="plotly_white"
+    )
     
-        fig_line.update_traces(line_width=3)
+    fig_line.update_traces(line_width=3)
     
-        st.plotly_chart(fig_line, use_container_width=True)
+    fig_line.update_xaxes(
+        dtick=3600000,
+        tickformat="%H:%M"
+    )
+    
+    st.plotly_chart(fig_line, use_container_width=True)
