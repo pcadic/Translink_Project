@@ -221,20 +221,34 @@ if not df.empty:
     # Hourly Delay Trends by Route
     route_response = supabase.table("v_route_hourly_delay").select("*").execute()
     route_df = pd.DataFrame(route_response.data)
-    
-    selected_route = st.selectbox(
-        "Select Route",
+
+    routes = sorted(
         route_df["route_no"].unique(),
-        key="route_selector"
+        key=lambda x: int(x) if str(x).isdigit() else str(x)
     )
     
-    filtered_route = route_df[route_df["route_no"] == selected_route]
-    
+    selected_routes = st.multiselect(
+        "Select Route(s)",
+        routes,
+        default=routes[:1],  # optionnel : première route sélectionnée
+        key="route_selector_multi"
+    )
+
+    filtered_route = route_df[
+        route_df["route_no"].isin(selected_routes)
+    ]
+
     fig_route = px.line(
         filtered_route,
         x="hour_vancouver",
         y="avg_delay_min",
+        color="route_no",
         markers=True
+    )
+    
+    fig_route.update_xaxes(
+        dtick=3600000,
+        tickformat="%H:%M"
     )
     
     st.plotly_chart(fig_route, use_container_width=True)
