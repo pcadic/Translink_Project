@@ -226,11 +226,11 @@ if not df.empty:
         route_df["route_no"].unique(),
         key=lambda x: int(x) if str(x).isdigit() else str(x)
     )
-    
+
     selected_routes = st.multiselect(
         "Select Route(s)",
         routes,
-        default=routes[:1],  # optionnel : première route sélectionnée
+        placeholder="Choose one or more routes",
         key="route_selector_multi"
     )
 
