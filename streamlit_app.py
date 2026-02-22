@@ -169,7 +169,8 @@ if not df.empty:
         fig_neigh.update_layout(coloraxis_showscale=False)
         st.plotly_chart(fig_neigh, use_container_width=True)
 
-    # --- HOURLY TREND ---
+    # --- HOURLY TREND - General ---
+    # Hourly Delay Trends
     st.markdown("---")
     st.subheader("⏳ Hourly Delay Trends (Vancouver Time)")
 
@@ -199,3 +200,18 @@ if not df.empty:
     )
     
     st.plotly_chart(fig_line, use_container_width=True)
+
+    # --- HOURLY TREND  - City ---
+    # Hourly Delay Trends by City
+    city_response = supabase.table("v_city_hourly_delay").select("*").execute()
+    city_df = pd.DataFrame(city_response.data)
+    
+    fig_city_trend = px.line(
+        city_df,
+        x="hour_vancouver",
+        y="avg_delay_min",
+        color="area_name",
+        markers=True
+    )
+    
+    st.plotly_chart(fig_city_trend, use_container_width=True)
