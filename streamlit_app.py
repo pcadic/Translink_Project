@@ -173,31 +173,24 @@ if not df.empty:
     st.markdown("---")
     st.subheader("⏳ Hourly Delay Trends (Vancouver Time)")
 
-    st.write(df["hour_bucket"].unique())
-    st.write(df.groupby("hour_bucket").size())
-
-    hourly_trend = (
-        df.groupby("hour_bucket")["delay_min"]
-        .mean()
-        .reset_index()
-        .sort_values("hour_bucket")
-    )
-
-    fig_line = px.line(
-        hourly_trend,
-        x="hour_bucket",
-        y="delay_min",
-        markers=True,
-        labels={
-            "hour_bucket": "Time",
-            "delay_min": "Avg Delay (min)"
-        },
-        template="plotly_white"
-    )
-
-    fig_line.update_traces(line_width=3)
-
-    st.plotly_chart(fig_line, use_container_width=True)
-
-else:
-    st.warning("No data found. Ensure your fetcher script is uploading to Supabase.")
+    hourly_response = supabase.table("v_hourly_delay").select("*").execute()
+    hourly_df = pd.DataFrame(hourly_response.data)
+    
+    if not hourly_df.empty:
+        hourly_df["hour_vancouver"] = pd.to_datetime(hourly_df["hour_vancouver"])
+    
+        fig_line = px.line(
+            hourly_df,
+            x="hour_vancouver",
+            y="avg_delay_min",
+            markers=True,
+            labels={
+                "hour_vancouver": "Time (Vancouver)",
+                "avg_delay_min": "Avg Delay (min)"
+            },
+            template="plotly_white"
+        )
+    
+        fig_line.update_traces(line_width=3)
+    
+        st.plotly_chart(fig_line, use_container_width=True)
