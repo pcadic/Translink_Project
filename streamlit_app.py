@@ -215,3 +215,50 @@ if not df.empty:
     )
     
     st.plotly_chart(fig_city_trend, use_container_width=True)
+
+
+    # --- HOURLY TREND  - Route ---
+    # Hourly Delay Trends by Route
+    route_response = supabase.table("v_route_hourly_delay").select("*").execute()
+    route_df = pd.DataFrame(route_response.data)
+    
+    selected_route = st.selectbox("Select Route", route_df["route_no"].unique())
+    
+    filtered_route = route_df[route_df["route_no"] == selected_route]
+    
+    fig_route = px.line(
+        filtered_route,
+        x="hour_vancouver",
+        y="avg_delay_min",
+        markers=True
+    )
+    
+    st.plotly_chart(fig_route, use_container_width=True)
+
+    route_response = supabase.table("v_route_hourly_delay").select("*").execute()
+    route_df = pd.DataFrame(route_response.data)
+    
+    selected_route = st.selectbox("Select Route", route_df["route_no"].unique())
+    
+    filtered_route = route_df[route_df["route_no"] == selected_route]
+    
+    fig_route = px.line(
+        filtered_route,
+        x="hour_vancouver",
+        y="avg_delay_min",
+        markers=True
+    )
+    
+    st.plotly_chart(fig_route, use_container_width=True)
+
+    # --- HOURLY TREND  - Neighbour ---
+    # Hourly Delay Trends by Neighbour
+    heatmap_df = city_df.pivot(
+        index="area_name",
+        columns="hour_vancouver",
+        values="avg_delay_min"
+    )
+    
+    fig_heatmap = px.imshow(heatmap_df)
+    
+    st.plotly_chart(fig_heatmap, use_container_width=True)
