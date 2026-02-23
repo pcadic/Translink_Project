@@ -298,7 +298,6 @@ if not df.empty:
     heatmap_df = city_df.pivot(
         index="area_name",
         columns="hour_vancouver",
-        color_continuous_scale="RdYlGn_r",
         values="avg_delay_min"
     )
     
