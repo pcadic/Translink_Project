@@ -51,8 +51,8 @@ def run_pipeline():
 
         # 2. CHARGEMENT GEOJSON (Vancouver)
         print("Chargement des zones géographiques...")
-        municipalities = gpd.read_file("vancouver_areas.geojson")
-        neighborhoods = gpd.read_file("neighborhoods.geojson")
+        municipalities = gpd.read_file("data\vancouver_areas.geojson")
+        neighborhoods = gpd.read_file("data\neighborhoods.geojson")
 
         # 3. TRAITEMENT DES BUS
         for entity in pos_feed.entity:
