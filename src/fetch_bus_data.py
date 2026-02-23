@@ -31,12 +31,21 @@ def run_pipeline():
     alerts_batch = []
 
     try:
-        # 1. FETCH API
+        # 1. CHARGEMENT DES RÉFÉRENCES (JOINTS)
+        print("Chargement des tables de référence Supabase...")
+        # On récupère les données de mapping pour éviter les requêtes SQL dans la boucle
+        routes_data = supabase.table("routes").select("route_id, route_short_name, route_long_name").execute().data
+        routes_ref = pd.DataFrame(routes_data)
+        
+        dirs_data = supabase.table("Directions").select("route_name, direction_id, direction_name").execute().data
+        dirs_ref = pd.DataFrame(dirs_data)
+
+        # 2. FETCH API
         print("Récupération des flux TransLink...")
         pos_feed = get_feed("gtfsposition")
         rt_feed = get_feed("gtfsrealtime")
         
-        # 2. TRAITEMENT DES ALERTES
+        # 3. TRAITEMENT DES ALERTES
         print(f"Analyse de {len(rt_feed.entity)} entités pour les alertes...")
         for entity in rt_feed.entity:
             if entity.HasField('alert'):
@@ -55,9 +64,8 @@ def run_pipeline():
                     "created_at": fetch_time_utc 
                 })
         
-        # 3. TRAITEMENT DES BUS (GEOSPATIAL)
+        # 4. TRAITEMENT DES BUS (GEOSPATIAL & ENRICHISSEMENT)
         print("Chargement du GeoJSON et traitement des bus...")
-        # LIGNES ORIGINALES CONSERVÉES :
         gdf = gpd.read_file('data/metro_vancouver_map.geojson')
         neighborhoods = gdf[gdf['area_type'] == 'neighborhood']
         municipalities = gdf[gdf['area_type'] == 'municipality']
@@ -70,11 +78,21 @@ def run_pipeline():
                 v = entity.vehicle
                 p = Point(v.position.longitude, v.position.latitude)
                 
-                # --- LOGIQUE DE NETTOYAGE DU NUMÉRO DE ROUTE (RAJOUT) ---
-                raw_route = v.trip.route_id
-                clean_route = str(raw_route).lstrip('0') if str(raw_route).isdigit() else str(raw_route)
-                if not clean_route: clean_route = "0"
+                # Identifiants API
+                raw_route_id = v.trip.route_id
+                raw_direction_id = str(v.trip.direction_id) # '0' ou '1'
                 
+                # A. Recherche dans la table 'routes'
+                r_match = routes_ref[routes_ref['route_id'] == raw_route_id]
+                r_short = r_match['route_short_name'].values[0] if not r_match.empty else None
+                r_long = r_match['route_long_name'].values[0] if not r_match.empty else None
+                
+                # B. Recherche dans la table 'Directions'
+                # On utilise r_short car votre table Directions se base sur route_name (ex: '99')
+                d_match = dirs_ref[(dirs_ref['route_name'] == r_short) & (dirs_ref['direction_id'] == raw_direction_id)]
+                d_name = d_match['direction_name'].values[0] if not d_match.empty else None
+
+                # C. Géo-localisation
                 m_city = municipalities[municipalities.contains(p)]
                 city_name = m_city.iloc[0]['name'] if not m_city.empty else "Off-Map"
                 
@@ -88,9 +106,11 @@ def run_pipeline():
                 
                 bus_batch.append({
                     "vehicle_no": v.vehicle.id,
-                    "route_no": v.trip.route_id,
-                    "route_short_name": clean_route, # SEUL RAJOUT DANS LE BATCH
-                    "direction": "Inbound" if v.trip.direction_id == 0 else "Outbound",
+                    "route_no": raw_route_id,
+                    "route_short_name": r_short, # Issu de la table routes
+                    "route_long_name": r_long,   # Issu de la table routes
+                    "direction": raw_direction_id, # Stocke '0' ou '1'
+                    "direction_name": d_name,      # Issu de la table Directions
                     "latitude": v.position.latitude,
                     "longitude": v.position.longitude,
                     "area_name": neigh_name if neigh_name else city_name,
@@ -100,7 +120,7 @@ def run_pipeline():
                     "recorded_time": fetch_time_utc
                 })
 
-        # 4. ENVOI SUPABASE
+        # 5. ENVOI SUPABASE
         if alerts_batch:
             print(f"Envoi de {len(alerts_batch)} alertes...")
             supabase.table("service_alerts").upsert(alerts_batch, on_conflict="alert_id").execute()
