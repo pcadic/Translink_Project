@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from supabase import create_client
-from datetime import datetime
 import pytz
 
 # ----------------------------
@@ -23,8 +22,7 @@ VAN_TZ = pytz.timezone("America/Vancouver")
 @st.cache_data(ttl=600)
 def load_data():
     response = supabase.table("bus_positions").select("*").execute()
-    df = pd.DataFrame(response.data)
-    return df
+    return pd.DataFrame(response.data)
 
 df = load_data()
 
@@ -33,11 +31,17 @@ if df.empty:
     st.stop()
 
 # ----------------------------
-# TIME PROCESSING
+# PREPARE DATA
 # ----------------------------
+
+# Convert timestamps
 df["recorded_time"] = pd.to_datetime(df["recorded_time"], utc=True)
 df["recorded_time_van"] = df["recorded_time"].dt.tz_convert(VAN_TZ)
 
+# Convert delay to minutes
+df["delay_min"] = df["delay_seconds"] / 60
+
+# Floor to full hour
 df["hour_vancouver"] = df["recorded_time_van"].dt.floor("H")
 
 # ----------------------------
@@ -50,12 +54,12 @@ col2.metric("Average Delay (min)", round(df["delay_min"].mean(), 2))
 col3.metric("Max Delay (min)", round(df["delay_min"].max(), 2))
 
 # ----------------------------
-# MAP
+# COLOR SCALE (Green ↔ Yellow ↔ Red)
 # ----------------------------
-st.markdown("---")
-st.subheader("🗺️ Live Bus Delays")
-
-max_abs_delay = max(abs(df["delay_min"].max()), abs(df["delay_min"].min()))
+max_abs_delay = max(
+    abs(df["delay_min"].max()),
+    abs(df["delay_min"].min())
+)
 
 custom_scale = [
     [0.0, "#004d00"],   # dark green
@@ -64,6 +68,12 @@ custom_scale = [
     [0.75, "#ff9900"],
     [1.0, "#cc0000"]    # dark red
 ]
+
+# ----------------------------
+# MAP
+# ----------------------------
+st.markdown("---")
+st.subheader("🗺️ Live Bus Delays")
 
 fig_map = px.scatter_mapbox(
     df,
@@ -77,7 +87,7 @@ fig_map = px.scatter_mapbox(
 )
 
 fig_map.update_layout(
-    mapbox_style="carto-darkmatter",   # Navy style
+    mapbox_style="carto-darkmatter",  # navy but readable
     margin=dict(l=0, r=0, t=0, b=0),
     coloraxis_colorbar=dict(title="Delay (min)")
 )
@@ -99,7 +109,7 @@ fig_hist = px.histogram(
 
 fig_hist.update_layout(
     xaxis_title="Delay (minutes)",
-    yaxis_title="Count",
+    yaxis_title="Count"
 )
 
 st.plotly_chart(fig_hist, use_container_width=True)
@@ -140,18 +150,18 @@ st.plotly_chart(fig_line, use_container_width=True)
 # HEATMAP
 # ----------------------------
 st.markdown("---")
-st.subheader("🔥 Hourly Delay Intensity by Area")
+st.subheader("🔥 Hourly Delay Intensity by Municipality")
 
-if "area_name" in df.columns:
+if "municipality" in df.columns:
 
     city_hour = (
-        df.groupby(["area_name", "hour_vancouver"])["delay_min"]
+        df.groupby(["municipality", "hour_vancouver"])["delay_min"]
         .mean()
         .reset_index()
     )
 
     heatmap_df = city_hour.pivot(
-        index="area_name",
+        index="municipality",
         columns="hour_vancouver",
         values="delay_min"
     )
@@ -172,7 +182,7 @@ if "area_name" in df.columns:
             zmax=range_max,
             labels=dict(
                 x="Hour (Vancouver Time)",
-                y="Area",
+                y="Municipality",
                 color="Avg Delay (min)"
             )
         )
