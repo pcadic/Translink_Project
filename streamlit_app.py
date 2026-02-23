@@ -24,7 +24,6 @@ supabase = init_connection()
 @st.cache_data(ttl=0)
 def load_dashboard_data():
     try:
-        # Using RPC to fetch data efficiently
         response = supabase.rpc("get_all_bus_positions").execute()
         df = pd.DataFrame(response.data)
 
@@ -36,7 +35,6 @@ def load_dashboard_data():
             df["recorded_time_local"] = df["recorded_time"].dt.tz_convert("America/Vancouver")
             df["delay_min"] = df["delay_seconds"] / 60
 
-            # Filtering for Vancouver Metropolitan Area
             df = df[
                 (df["latitude"] > 48.0) & (df["latitude"] < 50.0) &
                 (df["longitude"] > -124.0) & (df["longitude"] < -122.0)
@@ -51,7 +49,7 @@ st.title("🚌 TransLink Real-Time Performance Dashboard")
 df = load_dashboard_data()
 
 if not df.empty:
-    # --- KPIs (English Labels) ---
+    # --- KPIs (English) ---
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Buses On-Grid", df["vehicle_no"].nunique())
     c2.metric("Punctuality", f"{(df['delay_min'].between(-1, 3)).mean() * 100:.1f}%")
@@ -63,16 +61,16 @@ if not df.empty:
     area_stats = df.groupby("area_name")["delay_min"].mean()
     c5.metric("Critical Zone", area_stats.idxmax() if not area_stats.empty else "N/A")
 
-    # High Contrast Color Scale (Yellow at 0)
+    # High contrast scale for visibility
     custom_scale = [
-        [0.0, "#006400"],   # Dark Green (Early)
-        [0.25, "#00cc00"],  # Green
-        [0.5, "#ffff00"],   # Bright Yellow (On Time) - Changed for visibility
-        [0.75, "#ff9900"],  # Orange
-        [1.0, "#cc0000"]    # Red (Late)
+        [0.0, "#006400"],   # early (dark green)
+        [0.25, "#00cc00"],  # early (green)
+        [0.5, "#ffff00"],   # ON TIME (bright yellow)
+        [0.75, "#ff9900"],  # late (orange)
+        [1.0, "#cc0000"]    # late (dark red)
     ]
 
-    # --- MAP (Style: Open-Street-Map for neutral contrast) ---
+    # --- MAP (English & Neutral Contrast) ---
     fig_map = px.scatter_mapbox(
         df,
         lat="latitude",
@@ -80,20 +78,16 @@ if not df.empty:
         color="delay_min",
         hover_name="area_name",
         zoom=10,
-        mapbox_style="open-street-map", 
+        mapbox_style="open-street-map",
         color_continuous_scale=custom_scale,
         color_continuous_midpoint=0,
         labels={"delay_min": "Delay (min)"}
     )
-    
-    # FIXED: marker line is not supported in scatter_mapbox, 
-    # increasing size and opacity for visibility instead.
-    fig_map.update_traces(marker=dict(size=10, opacity=0.9))
-    
-    fig_map.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=600)
+    fig_map.update_traces(marker=dict(size=10, opacity=0.8))
+    fig_map.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=500)
     st.plotly_chart(fig_map, use_container_width=True)
 
-    # --- NEW: DELAY DISTRIBUTION HISTOGRAM ---
+    # --- HISTOGRAM (English) ---
     st.markdown("---")
     st.subheader("📊 Delay Distribution")
     fig_hist = px.histogram(
@@ -104,89 +98,72 @@ if not df.empty:
         color_discrete_sequence=["#00cc00"],
         template="plotly_white"
     )
-    fig_hist.update_layout(
-        xaxis_title="Delay (minutes)",
-        yaxis_title="Bus Count",
-        bargap=0.1
-    )
+    fig_hist.update_layout(xaxis_title="Delay (min)", yaxis_title="Number of Buses", bargap=0.1)
     st.plotly_chart(fig_hist, use_container_width=True)
 
-    # Color range calculation for bar charts
-    max_delay = df["delay_min"].max()
-    min_delay = df["delay_min"].min()
-    range_max = max(abs(max_delay), abs(min_delay))
+    # Calculate dynamic range for bar charts
+    max_d = df["delay_min"].max()
+    min_d = df["delay_min"].min()
+    r_max = max(abs(max_d), abs(min_d))
 
     st.markdown("---")
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("🏙️ Top Delays by City")
-        city_avg = df[df["area_type"] == "municipality"].groupby("area_name")["delay_min"].mean().reset_index().sort_values("delay_min", ascending=True)
+        city_avg = df[df["area_type"] == "municipality"].groupby("area_name")["delay_min"].mean().reset_index().sort_values("delay_min")
         fig_city = px.bar(
             city_avg, x="delay_min", y="area_name", orientation="h", color="delay_min",
-            color_continuous_scale=custom_scale, range_color=[-range_max, range_max],
-            labels={"delay_min": "Avg Delay (min)", "area_name": "City"}
+            color_continuous_scale=custom_scale, range_color=[-r_max, r_max]
         )
-        fig_city.update_layout(coloraxis_showscale=False)
+        fig_city.update_layout(coloraxis_showscale=False, xaxis_title="Avg Delay (min)", yaxis_title=None)
         st.plotly_chart(fig_city, use_container_width=True)
 
     with col2:
         st.subheader("🏘️ Top Delays by Neighborhood")
-        neigh_avg = df[df["area_type"] == "neighborhood"].groupby("area_name")["delay_min"].mean().reset_index().sort_values("delay_min", ascending=True).tail(15)
+        neigh_avg = df[df["area_type"] == "neighborhood"].groupby("area_name")["delay_min"].mean().reset_index().sort_values("delay_min").tail(15)
         fig_neigh = px.bar(
             neigh_avg, x="delay_min", y="area_name", orientation="h", color="delay_min",
-            color_continuous_scale=custom_scale, range_color=[-range_max, range_max],
-            labels={"delay_min": "Avg Delay (min)", "area_name": "Neighborhood"}
+            color_continuous_scale=custom_scale, range_color=[-r_max, r_max]
         )
-        fig_neigh.update_layout(coloraxis_showscale=False)
+        fig_neigh.update_layout(coloraxis_showscale=False, xaxis_title="Avg Delay (min)", yaxis_title=None)
         st.plotly_chart(fig_neigh, use_container_width=True)
 
-    # --- HOURLY TRENDS ---
+    # --- HOURLY TRENDS (English) ---
     st.markdown("---")
     st.subheader("⏳ Hourly Delay Trends")
     
-    # General Trend from View
-    hourly_response = supabase.table("v_hourly_delay").select("*").execute()
-    hourly_df = pd.DataFrame(hourly_response.data)
-    if not hourly_df.empty:
-        hourly_df["hour_vancouver"] = pd.to_datetime(hourly_df["hour_vancouver"])
-        fig_line = px.line(
-            hourly_df, x="hour_vancouver", y="avg_delay_min", markers=True,
-            labels={"hour_vancouver": "Time (Vancouver)", "avg_delay_min": "Avg Delay (min)"},
-            template="plotly_white"
-        )
-        fig_line.update_xaxes(dtick=3600000, tickformat="%H:%M")
+    h_res = supabase.table("v_hourly_delay").select("*").execute()
+    h_df = pd.DataFrame(h_res.data)
+    if not h_df.empty:
+        h_df["hour_vancouver"] = pd.to_datetime(h_df["hour_vancouver"])
+        fig_line = px.line(h_df, x="hour_vancouver", y="avg_delay_min", markers=True, template="plotly_white")
+        fig_line.update_xaxes(dtick=3600000, tickformat="%H:%M", title="Time")
+        fig_line.update_yaxes(title="Avg Delay (min)")
         st.plotly_chart(fig_line, use_container_width=True)
 
-    # City Selector & Trend
-    city_response = supabase.table("v_city_hourly_delay").select("*").execute()
-    city_df = pd.DataFrame(city_response.data)
-    if not city_df.empty:
-        city_df["hour_vancouver"] = pd.to_datetime(city_df["hour_vancouver"])
-        cities = sorted(city_df["area_name"].unique())
-        selected_cities = st.multiselect("Filter by City", cities, default=cities[:1])
-        filtered_city = city_df[city_df["area_name"].isin(selected_cities)]
-        fig_city_trend = px.line(
-            filtered_city, x="hour_vancouver", y="avg_delay_min", color="area_name", markers=True,
-            template="plotly_white"
-        )
-        fig_city_trend.update_xaxes(dtick=3600000, tickformat="%H:%M")
-        st.plotly_chart(fig_city_trend, use_container_width=True)
+    # City filter trend
+    c_res = supabase.table("v_city_hourly_delay").select("*").execute()
+    c_df = pd.DataFrame(c_res.data)
+    if not c_df.empty:
+        c_df["hour_vancouver"] = pd.to_datetime(c_df["hour_vancouver"])
+        cities = sorted(c_df["area_name"].unique())
+        sel_cities = st.multiselect("Select Cities to Compare", cities, default=cities[:1])
+        f_city = c_df[c_df["area_name"].isin(sel_cities)]
+        fig_c_trend = px.line(f_city, x="hour_vancouver", y="avg_delay_min", color="area_name", markers=True)
+        fig_c_trend.update_xaxes(dtick=3600000, tickformat="%H:%M")
+        st.plotly_chart(fig_c_trend, use_container_width=True)
 
-    # --- INTENSITY HEATMAP ---
+    # --- HEATMAP (English) ---
     st.markdown("---")
-    st.subheader("🔥 Delay Intensity Heatmap by City")
-    if not city_df.empty:
-        heatmap_df = city_df.pivot(index="area_name", columns="hour_vancouver", values="avg_delay_min")
-        heatmap_df.columns = pd.to_datetime(heatmap_df.columns)
-        heatmap_df = heatmap_df.sort_index(axis=1)
-        
-        fig_heatmap = px.imshow(
-            heatmap_df,
-            aspect="auto",
-            color_continuous_scale=custom_scale,
-            zmin=-range_max, zmax=range_max,
-            labels=dict(x="Hour", y="City", color="Avg Delay")
+    st.subheader("🔥 Hourly Delay Intensity Heatmap")
+    if not c_df.empty:
+        heat_df = c_df.pivot(index="area_name", columns="hour_vancouver", values="avg_delay_min")
+        heat_df.columns = pd.to_datetime(heat_df.columns)
+        heat_df = heat_df.sort_index(axis=1)
+        fig_heat = px.imshow(
+            heat_df, aspect="auto", color_continuous_scale=custom_scale, 
+            zmin=-r_max, zmax=r_max, labels=dict(x="Time", y="City", color="Delay")
         )
-        fig_heatmap.update_xaxes(dtick=3600000, tickformat="%H:%M")
-        st.plotly_chart(fig_heatmap, use_container_width=True)
+        fig_heat.update_xaxes(dtick=3600000, tickformat="%H:%M")
+        st.plotly_chart(fig_heat, use_container_width=True)
