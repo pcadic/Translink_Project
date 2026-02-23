@@ -26,25 +26,26 @@ def run_pipeline():
     print("--- DEBUT DU PIPELINE ---")
     fetch_time_utc = datetime.now(timezone.utc).isoformat()
     bus_batch = []
-    alerts_batch = []
 
     try:
-        # 1. CHARGEMENT DES RÉFÉRENCES (AVEC LIMITES AUGMENTÉES)
+        # 1. CHARGEMENT DES RÉFÉRENCES
         print("Chargement des tables de référence Supabase...")
         
-        # On force une limite haute (ex: 10 000) pour récupérer tout le GTFS
+        # Récupération des routes
         r_res = supabase.table("routes").select("*").limit(10000).execute()
         routes_ref = pd.DataFrame(r_res.data)
+        if not routes_ref.empty:
+            routes_ref.columns = routes_ref.columns.str.lower() # Sécurité casse
         
+        # Récupération des directions
         d_res = supabase.table("Directions").select("*").limit(10000).execute()
         dirs_ref = pd.DataFrame(d_res.data)
+        if not dirs_ref.empty:
+            dirs_ref.columns = dirs_ref.columns.str.lower() # Sécurité casse
 
-        # DEBUG: On vérifie si les colonnes existent vraiment
-        print(f"Colonnes trouvées dans 'routes': {list(routes_ref.columns)}")
-        print(f"Colonnes trouvées dans 'Directions': {list(dirs_ref.columns)}")
+        print(f"Routes chargées: {len(routes_ref)} | Directions chargées: {len(dirs_ref)}")
 
         # 2. FETCH API
-        print("Récupération des flux TransLink...")
         pos_feed = get_feed("gtfsposition")
         rt_feed = get_feed("gtfsrealtime")
 
@@ -65,7 +66,7 @@ def run_pipeline():
                 raw_route_id = v.trip.route_id
                 raw_dir_id = str(v.trip.direction_id)
 
-                # LOOKUP ROUTES (Sécurisé)
+                # LOOKUP : Route info
                 r_short, r_long = None, None
                 if not routes_ref.empty and 'route_id' in routes_ref.columns:
                     match = routes_ref[routes_ref['route_id'] == raw_route_id]
@@ -73,15 +74,15 @@ def run_pipeline():
                         r_short = match.iloc[0]['route_short_name']
                         r_long = match.iloc[0]['route_long_name']
 
-                # LOOKUP DIRECTIONS (Sécurisé)
+                # LOOKUP : Direction Name
                 d_name = None
                 if not dirs_ref.empty and 'route_name' in dirs_ref.columns:
-                    # On cherche par route_short_name (ex: '99')
+                    # On compare avec r_short (ex: '99')
                     d_match = dirs_ref[(dirs_ref['route_name'] == r_short) & (dirs_ref['direction_id'] == raw_dir_id)]
                     if not d_match.empty:
                         d_name = d_match.iloc[0]['direction_name']
 
-                # Géo-localisation (votre logique originale)
+                # Géo-localisation
                 m_city = municipalities[municipalities.contains(p)]
                 city_name = m_city.iloc[0]['name'] if not m_city.empty else "Off-Map"
                 m_neigh = neighborhoods[neighborhoods.contains(p)]
@@ -103,7 +104,7 @@ def run_pipeline():
                     "recorded_time": fetch_time_utc
                 })
 
-        # 5. ENVOI SUPABASE
+        # 5. ENVOI
         if bus_batch:
             supabase.table("bus_positions").insert(bus_batch).execute()
             print(f"--- TERMINE : {len(bus_batch)} positions insérées ---")
