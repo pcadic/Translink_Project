@@ -100,6 +100,28 @@ if not df.empty:
 
     st.plotly_chart(fig_map, use_container_width=True)
 
+
+    # --- DELAY DISTRIBUTION ---
+    st.markdown("---")
+    st.subheader("📊 Distribution of Delays")
+
+    fig_hist = px.histogram(
+        df,
+        x="delay_min",
+        nbins=40,
+        labels={"delay_min": "Delay (minutes)"},
+        template="plotly_white"
+    )
+
+    fig_hist.update_layout(
+        xaxis_title="Delay (minutes)",
+        yaxis_title="Number of Observations"
+    )
+
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+    
+
     # --- COLOR RANGE ---
     max_delay = df["delay_min"].max()
     min_delay = df["delay_min"].min()
@@ -293,14 +315,56 @@ if not df.empty:
     st.plotly_chart(fig_route, use_container_width=True)
 
       
-    # --- HOURLY TREND  - Neighbour ---
-    # Hourly Delay Trends by Neighbour
+    # --- HOURLY HEATMAP - 
+    st.markdown("---")
+    st.subheader("🔥 Hourly Delay Intensity by City")
+
     heatmap_df = city_df.pivot(
         index="area_name",
         columns="hour_vancouver",
         values="avg_delay_min"
     )
-    
-    fig_heatmap = px.imshow(heatmap_df)
-    
-    st.plotly_chart(fig_heatmap, use_container_width=True)
+
+    if not heatmap_df.empty:
+
+        # Convert columns to datetime
+        heatmap_df.columns = pd.to_datetime(heatmap_df.columns)
+
+        # Sort columns chronologically
+        heatmap_df = heatmap_df.sort_index(axis=1)
+
+        # Custom symmetric range
+        max_val = heatmap_df.max().max()
+        min_val = heatmap_df.min().min()
+        range_max = max(abs(max_val), abs(min_val))
+
+        custom_heat_scale = [
+            [0.0, "#004d00"],   # dark green
+            [0.25, "#00cc00"],  # green
+            [0.5, "#ffffcc"],   # yellow (center)
+            [0.75, "#ff9900"],  # orange
+            [1.0, "#cc0000"]    # dark red
+        ]
+
+        fig_heatmap = px.imshow(
+            heatmap_df,
+            aspect="auto",
+            color_continuous_scale=custom_heat_scale,
+            zmin=-range_max,
+            zmax=range_max,
+            labels=dict(
+                x="Hour (Vancouver Time)",
+                y="City",
+                color="Avg Delay (min)"
+            )
+        )
+
+        fig_heatmap.update_xaxes(
+            dtick=3600000,
+            tickformat="%H:%M"
+        )
+
+        st.plotly_chart(fig_heatmap, use_container_width=True)
+
+    else:
+        st.info("Not enough hourly city data available.")
