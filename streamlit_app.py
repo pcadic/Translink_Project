@@ -4,19 +4,12 @@ import plotly.express as px
 from supabase import create_client
 
 # --- CONFIGURATION ---
-st.set_page_config(
-    page_title="TransLink Performance Dashboard",
-    page_icon="🚌",
-    layout="wide"
-)
+st.set_page_config(page_title="TransLink Performance Dashboard", page_icon="🚌", layout="wide")
 
 # --- CONNECTION ---
 @st.cache_resource
 def init_connection():
-    return create_client(
-        st.secrets["SUPABASE_URL"],
-        st.secrets["SUPABASE_KEY"]
-    )
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 supabase = init_connection()
 
@@ -26,26 +19,20 @@ def load_dashboard_data():
     try:
         response = supabase.rpc("get_all_bus_positions").execute()
         df = pd.DataFrame(response.data)
-
         if not df.empty:
             df["recorded_time"] = pd.to_datetime(df["recorded_time"])
             if df["recorded_time"].dt.tz is None:
                 df["recorded_time"] = df["recorded_time"].dt.tz_localize("UTC")
-
             df["recorded_time_local"] = df["recorded_time"].dt.tz_convert("America/Vancouver")
             df["delay_min"] = df["delay_seconds"] / 60
-
-            df = df[
-                (df["latitude"] > 48.0) & (df["latitude"] < 50.0) &
-                (df["longitude"] > -124.0) & (df["longitude"] < -122.0)
-            ]
+            df = df[(df["latitude"] > 48.0) & (df["latitude"] < 50.0) & 
+                    (df["longitude"] > -124.0) & (df["longitude"] < -122.0)]
             return df
     except Exception as e:
         st.error(f"Error: {e}")
     return pd.DataFrame()
 
 st.title("🚌 TransLink Real-Time Performance Dashboard")
-
 df = load_dashboard_data()
 
 if not df.empty:
@@ -54,52 +41,58 @@ if not df.empty:
     c1.metric("Buses On-Grid", df["vehicle_no"].nunique())
     c2.metric("Punctuality", f"{(df['delay_min'].between(-1, 3)).mean() * 100:.1f}%")
     c3.metric("Avg Delay", f"{df['delay_min'].mean():.2f} min")
-
     route_stats = df.groupby("route_no")["delay_min"].mean().sort_values(ascending=False)
     c4.metric("Slowest Route", f"Line {route_stats.idxmax()}" if not route_stats.empty else "N/A")
-
     area_stats = df.groupby("area_name")["delay_min"].mean()
     c5.metric("Critical Zone", area_stats.idxmax() if not area_stats.empty else "N/A")
 
-    # High contrast scale for visibility
+    # --- FILTRE DE ROUTE (NOUVEAU) ---
+    st.markdown("---")
+    # On trie les routes numériquement si possible pour le menu
+    available_routes = sorted(df["route_no"].unique(), key=lambda x: int(x) if str(x).isdigit() else 999)
+    
+    # "All Routes" par défaut pour ne pas perdre l'utilisateur
+    selected_route = st.selectbox("🔍 Filter Map by Bus Route", ["All Routes"] + list(available_routes))
+
+    # Application du filtre au DataFrame de la carte
+    df_map = df.copy()
+    if selected_route != "All Routes":
+        df_map = df[df["route_no"] == selected_route]
+
+    # --- ÉCHELLE DE COULEUR ---
     custom_scale = [
-        [0.0, "#006400"],   # early (dark green)
-        [0.25, "#00cc00"],  # early (green)
-        [0.5, "#ffff00"],   # ON TIME (bright yellow)
-        [0.75, "#ff9900"],  # late (orange)
-        [1.0, "#cc0000"]    # late (dark red)
+        [0.0, "#006400"], [0.25, "#00cc00"], [0.5, "#ffff00"], 
+        [0.75, "#ff9900"], [1.0, "#cc0000"]
     ]
 
-    # --- MAP (English & Neutral Contrast) ---
+    # --- MAP ---
     fig_map = px.scatter_mapbox(
-        df,
-        lat="latitude",
-        lon="longitude",
-        color="delay_min",
-        hover_name="area_name",
+        df_map, lat="latitude", lon="longitude", color="delay_min",
+        hover_name="route_no", hover_data=["area_name", "delay_min"],
         zoom=10,
         mapbox_style="open-street-map",
         color_continuous_scale=custom_scale,
         color_continuous_midpoint=0,
         labels={"delay_min": "Delay (min)"}
     )
-    fig_map.update_traces(marker=dict(size=10, opacity=0.8))
+    fig_map.update_traces(marker=dict(size=12 if selected_route != "All Routes" else 10, opacity=0.8))
     fig_map.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=500)
     st.plotly_chart(fig_map, use_container_width=True)
 
-    # --- HISTOGRAM (English) ---
+    # --- DISTRIBUTION DES DÉLAIS ---
     st.markdown("---")
     st.subheader("📊 Delay Distribution")
+    # On utilise aussi le DataFrame filtré pour que l'histogramme réagisse au filtre
     fig_hist = px.histogram(
-        df, 
-        x="delay_min", 
-        nbins=50,
+        df_map, x="delay_min", nbins=50,
         labels={"delay_min": "Delay (minutes)"},
         color_discrete_sequence=["#00cc00"],
         template="plotly_white"
     )
     fig_hist.update_layout(xaxis_title="Delay (min)", yaxis_title="Number of Buses", bargap=0.1)
     st.plotly_chart(fig_hist, use_container_width=True)
+
+    # ... Le reste du code (Bar charts, Trends, Heatmap) reste identique
 
     # Calculate dynamic range for bar charts
     max_d = df["delay_min"].max()
