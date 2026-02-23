@@ -4,9 +4,9 @@ import plotly.express as px
 from supabase import create_client
 import pytz
 
-# ----------------------------
+# --------------------------------------------------
 # CONFIG
-# ----------------------------
+# --------------------------------------------------
 st.set_page_config(layout="wide")
 st.title("🚍 TransLink Delay Monitoring Dashboard")
 
@@ -16,9 +16,9 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 VAN_TZ = pytz.timezone("America/Vancouver")
 
-# ----------------------------
+# --------------------------------------------------
 # LOAD DATA
-# ----------------------------
+# --------------------------------------------------
 @st.cache_data(ttl=600)
 def load_data():
     response = supabase.table("bus_positions").select("*").execute()
@@ -30,39 +30,39 @@ if df.empty:
     st.warning("No data available.")
     st.stop()
 
-# ----------------------------
-# PREP DATA
-# ----------------------------
+# --------------------------------------------------
+# DATA PREP
+# --------------------------------------------------
 df["recorded_time"] = pd.to_datetime(df["recorded_time"], utc=True)
 df["recorded_time_van"] = df["recorded_time"].dt.tz_convert(VAN_TZ)
-
-df["delay_min"] = df["delay_seconds"] / 60
 df["hour_vancouver"] = df["recorded_time_van"].dt.floor("H")
 
-# ----------------------------
-# COLOR SCALE
-# ----------------------------
+# conversion secondes -> minutes
+df["delay_min"] = df["delay_seconds"] / 60
+
+# palette cohérente vert ↔ jaune ↔ rouge
 max_abs_delay = max(abs(df["delay_min"].max()), abs(df["delay_min"].min()))
 
 custom_scale = [
-    [0.0, "#004d00"],   # dark green
+    [0.0, "#004d00"],
     [0.25, "#00cc00"],
-    [0.5, "#ffffcc"],   # yellow
+    [0.5, "#ffffcc"],
     [0.75, "#ff9900"],
-    [1.0, "#cc0000"]    # dark red
+    [1.0, "#cc0000"],
 ]
 
-# ----------------------------
+# --------------------------------------------------
 # KPIs
-# ----------------------------
+# --------------------------------------------------
 col1, col2, col3 = st.columns(3)
+
 col1.metric("Total Observations", len(df))
 col2.metric("Average Delay (min)", round(df["delay_min"].mean(), 2))
 col3.metric("Max Delay (min)", round(df["delay_min"].max(), 2))
 
-# ----------------------------
-# MAP (Navy but readable)
-# ----------------------------
+# --------------------------------------------------
+# MAP
+# --------------------------------------------------
 st.markdown("---")
 st.subheader("🗺️ Live Bus Delays")
 
@@ -74,19 +74,19 @@ fig_map = px.scatter_mapbox(
     color_continuous_scale=custom_scale,
     range_color=(-max_abs_delay, max_abs_delay),
     zoom=10,
-    height=600
+    height=600,
 )
 
 fig_map.update_layout(
-    mapbox_style="carto-positron",   # MUCH lighter
+    mapbox_style="carto-positron",
     margin=dict(l=0, r=0, t=0, b=0),
 )
 
 st.plotly_chart(fig_map, use_container_width=True)
 
-# ----------------------------
-# HISTOGRAM
-# ----------------------------
+# --------------------------------------------------
+# 🔵 HISTOGRAMME (AJOUT UNIQUEMENT)
+# --------------------------------------------------
 st.markdown("---")
 st.subheader("📊 Delay Distribution")
 
@@ -94,14 +94,19 @@ fig_hist = px.histogram(
     df,
     x="delay_min",
     nbins=40,
-    template="plotly_white"
+    template="plotly_white",
+)
+
+fig_hist.update_layout(
+    xaxis_title="Delay (minutes)",
+    yaxis_title="Number of Observations",
 )
 
 st.plotly_chart(fig_hist, use_container_width=True)
 
-# ----------------------------
+# --------------------------------------------------
 # TOP ROUTES
-# ----------------------------
+# --------------------------------------------------
 st.markdown("---")
 st.subheader("📈 Top Routes by Average Delay")
 
@@ -120,14 +125,14 @@ fig_routes = px.bar(
     color="delay_min",
     color_continuous_scale=custom_scale,
     range_color=(-max_abs_delay, max_abs_delay),
-    template="plotly_white"
+    template="plotly_white",
 )
 
 st.plotly_chart(fig_routes, use_container_width=True)
 
-# ----------------------------
+# --------------------------------------------------
 # TOP MUNICIPALITIES
-# ----------------------------
+# --------------------------------------------------
 st.markdown("---")
 st.subheader("🏙 Top Municipalities by Average Delay")
 
@@ -145,14 +150,14 @@ fig_city = px.bar(
     color="delay_min",
     color_continuous_scale=custom_scale,
     range_color=(-max_abs_delay, max_abs_delay),
-    template="plotly_white"
+    template="plotly_white",
 )
 
 st.plotly_chart(fig_city, use_container_width=True)
 
-# ----------------------------
+# --------------------------------------------------
 # HOURLY TREND
-# ----------------------------
+# --------------------------------------------------
 st.markdown("---")
 st.subheader("⏱ Hourly Delay Trends (Vancouver Time)")
 
@@ -167,19 +172,19 @@ fig_line = px.line(
     x="hour_vancouver",
     y="delay_min",
     markers=True,
-    template="plotly_white"
+    template="plotly_white",
 )
 
 fig_line.update_xaxes(
     dtick=3600000,
-    tickformat="%H:%M"
+    tickformat="%H:%M",
 )
 
 st.plotly_chart(fig_line, use_container_width=True)
 
-# ----------------------------
+# --------------------------------------------------
 # HEATMAP
-# ----------------------------
+# --------------------------------------------------
 st.markdown("---")
 st.subheader("🔥 Hourly Delay Intensity by Municipality")
 
@@ -192,7 +197,7 @@ city_hour = (
 heatmap_df = city_hour.pivot(
     index="municipality",
     columns="hour_vancouver",
-    values="delay_min"
+    values="delay_min",
 )
 
 if not heatmap_df.empty:
@@ -212,13 +217,13 @@ if not heatmap_df.empty:
         labels=dict(
             x="Hour",
             y="Municipality",
-            color="Avg Delay (min)"
-        )
+            color="Avg Delay (min)",
+        ),
     )
 
     fig_heatmap.update_xaxes(
         dtick=3600000,
-        tickformat="%H:%M"
+        tickformat="%H:%M",
     )
 
     st.plotly_chart(fig_heatmap, use_container_width=True)
