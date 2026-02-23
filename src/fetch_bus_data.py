@@ -5,7 +5,7 @@ import geopandas as gpd
 from google.transit import gtfs_realtime_pb2
 from shapely.geometry import Point
 from supabase import create_client
-from datetime import datetime, timezone  # Added timezone here
+from datetime import datetime, timezone
 
 # --- CONFIGURATION ---
 TRANSLINK_API_KEY = os.environ.get('TRANSLINK_API_KEY')
@@ -25,8 +25,6 @@ def get_feed(endpoint):
 def run_pipeline():
     print("--- DEBUT DU PIPELINE ---")
     
-    # Capture the exact moment of the fetch in UTC
-    # This is the "Gold Standard" for time-series data
     fetch_time_utc = datetime.now(timezone.utc).isoformat()
     
     bus_batch = []
@@ -37,55 +35,58 @@ def run_pipeline():
         print("Récupération des flux TransLink...")
         pos_feed = get_feed("gtfsposition")
         rt_feed = get_feed("gtfsrealtime")
-        
-        # 2. TRAITEMENT DES ALERTES
-        print(f"Analyse de {len(rt_feed.entity)} entités pour les alertes...")
+
+        # Extraction des délais (trip_id -> delay)
+        delays = {}
         for entity in rt_feed.entity:
-            if entity.HasField('alert'):
-                a = entity.alert
-                h_text = a.header_text.translation[0].text if a.header_text.translation else "No Header"
-                d_text = a.description_text.translation[0].text if a.description_text.translation else "No Description"
-                r_id = a.informed_entity[0].route_id if a.informed_entity else None
-                
-                # We use fetch_time_utc for created_at to keep it consistent
-                alerts_batch.append({
-                    "alert_id": str(entity.id),
-                    "route_id": r_id,
-                    "header_text": h_text,
-                    "description_text": d_text,
-                    "cause": str(a.cause) if a.cause else "UNKNOWN_CAUSE",
-                    "effect": str(a.effect) if a.effect else "UNKNOWN_EFFECT",
-                    "created_at": fetch_time_utc 
-                })
-        
-        # 3. TRAITEMENT DES BUS (GEOSPATIAL)
-        print("Chargement du GeoJSON et traitement des bus...")
-        gdf = gpd.read_file('data/metro_vancouver_map.geojson')
-        neighborhoods = gdf[gdf['area_type'] == 'neighborhood']
-        municipalities = gdf[gdf['area_type'] == 'municipality']
+            if entity.HasField('trip_update'):
+                tu = entity.trip_update
+                if tu.stop_time_update:
+                    # On prend le délai du dernier arrêt mis à jour
+                    last_update = tu.stop_time_update[-1]
+                    if last_update.HasField('arrival'):
+                        delays[tu.trip.trip_id] = last_update.arrival.delay
+                    elif last_update.HasField('departure'):
+                        delays[tu.trip.trip_id] = last_update.departure.delay
 
-        delays = {ent.trip_update.trip.trip_id: ent.trip_update.stop_time_update[0].arrival.delay 
-                  for ent in rt_feed.entity if ent.HasField('trip_update') and ent.trip_update.stop_time_update}
+        # 2. CHARGEMENT GEOJSON (Vancouver)
+        print("Chargement des zones géographiques...")
+        municipalities = gpd.read_file("vancouver_areas.geojson")
+        neighborhoods = gpd.read_file("neighborhoods.geojson")
 
+        # 3. TRAITEMENT DES BUS
         for entity in pos_feed.entity:
             if entity.HasField('vehicle'):
                 v = entity.vehicle
                 p = Point(v.position.longitude, v.position.latitude)
                 
-                m_city = municipalities[municipalities.contains(p)]
-                city_name = m_city.iloc[0]['name'] if not m_city.empty else "Off-Map"
+                # --- LOGIQUE DE NETTOYAGE DU NUMÉRO DE ROUTE ---
+                raw_route = v.trip.route_id
+                # On retire les zéros inutiles (ex: '099' -> '99')
+                # Mais on garde les lettres intactes (ex: 'R4')
+                clean_route = str(raw_route).lstrip('0') if str(raw_route).isdigit() else str(raw_route)
+                if not clean_route: clean_route = "0"
                 
-                m_neigh = neighborhoods[neighborhoods.contains(p)]
+                # Identification de la zone
+                city_name = "Unknown"
                 neigh_name = None
-                if not m_neigh.empty:
-                    for name in m_neigh['name']:
-                        if name != city_name:
-                            neigh_name = name
-                            break
+                
+                m_city = municipalities[municipalities.contains(p)]
+                if not m_city.empty:
+                    city_name = m_city.iloc[0]['name']
+                    
+                    n_neigh = neighborhoods[neighborhoods.contains(p)]
+                    if not n_neigh.empty:
+                        for _, row in n_neigh.iterrows():
+                            name = row['name']
+                            if name != city_name:
+                                neigh_name = name
+                                break
                 
                 bus_batch.append({
                     "vehicle_no": v.vehicle.id,
-                    "route_no": v.trip.route_id,
+                    "route_no": v.trip.route_id, # Inchangé (champ original)
+                    "route_short_name": clean_route, # NOUVELLE COLONNE PROPRE
                     "direction": "Inbound" if v.trip.direction_id == 0 else "Outbound",
                     "latitude": v.position.latitude,
                     "longitude": v.position.longitude,
@@ -93,7 +94,6 @@ def run_pipeline():
                     "area_type": "neighborhood" if neigh_name else "municipality",
                     "municipality": city_name,
                     "delay_seconds": delays.get(v.trip.trip_id, 0),
-                    # UPDATED: Using the standardized fetch time
                     "recorded_time": fetch_time_utc
                 })
 
