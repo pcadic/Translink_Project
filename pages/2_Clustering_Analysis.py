@@ -113,28 +113,37 @@ if not df_all.empty:
 
         # --- INTERPRETATION DES CLUSTERS ---
         st.markdown("---")
-        st.subheader("📋 Profile Characteristics")
+        st.subheader("📋 Profile Characteristics (Ordered by Performance)")
         
+        # We sort by mean_delay so Profile with lowest delay is always on the left
         c_summary = stats.groupby("cluster")[features].mean().sort_values("mean_delay")
+        
+        # Create columns based on the number of clusters found
         cols = st.columns(len(c_summary))
 
         for i, (c_id, row) in enumerate(c_summary.iterrows()):
             with cols[i]:
-                # Identification automatique du type de zone
+                # Dynamic Logic based on the sorted values
                 if row["mean_delay"] < 1.0:
                     status = "🟢 Efficient"
+                    border_color = "green"
                 elif row["volatility"] > 1.5:
                     status = "🟡 Unpredictable"
+                    border_color = "orange"
                 else:
                     status = "🔴 Critical"
+                    border_color = "red"
                 
-                st.metric(f"Profile {c_id}: {status}", f"{row['mean_delay']:.2f}m")
-                st.caption(f"Volatility: {row['volatility']:.2f}")
-                st.caption(f"Late Trips: {row['late_trip_pct']:.1f}%")
+                # Displaying the cluster info
+                st.markdown(f"### {status}")
+                st.write(f"**Cluster ID:** {c_id}")
+                st.metric("Avg Delay", f"{row['mean_delay']:.2f} min")
+                st.metric("Volatility", f"{row['volatility']:.2f}")
+                st.metric("Late Trip %", f"{row['late_trip_pct']:.1f}%")
                 
-                # Exemples de quartiers dans ce groupe
+                # Show representative neighborhoods
                 examples = stats[stats["cluster"] == c_id]["area_name"].head(3).tolist()
-                st.write(f"*{', '.join(examples)}*")
+                st.info(f"**Locations:** \n{', '.join(examples)}")
 
     else:
         st.info("Gathering more data to identify distinct clusters...")
