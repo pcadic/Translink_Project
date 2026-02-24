@@ -13,29 +13,29 @@ def init_connection():
 
 supabase = init_connection()
 
-# --- YOUR ORIGINAL COLOR SCALE ---
+# --- VOTRE ECHELLE DE COULEURS ORIGINALE ---
 color_scale = [
     [0.0, "green"],
     [0.15, "green"],
-    [0.2, "yellow"], # On-time at 0
+    [0.2, "yellow"], # On-time (0)
     [0.25, "red"],
     [1.0, "red"]
 ]
 
 st.title("📈 Global Performance Analytics")
-st.markdown("This page analyzes historical patterns across all recorded runs to identify recurring bottlenecks.")
+st.markdown("Analysis of historical patterns using pre-aggregated database views.")
 
-# --- 1. HOURLY TRENDS BY ROUTE ---
-st.subheader("🚌 Route Performance over Time")
+# --- 1. PERFORMANCE PAR LIGNE (Vue: v_route_hourly_delay) ---
+st.subheader("🚌 Route Delay Trends (Hourly)")
 
-# Fetching from the hourly route view
+# Fetch from your specific view
 r_res = supabase.table("v_route_hourly_delay").select("*").execute()
 r_df = pd.DataFrame(r_res.data)
 
 if not r_df.empty:
     r_df["hour_vancouver"] = pd.to_datetime(r_df["hour_vancouver"])
     
-    # Filter by route_short_name (the improvement we made)
+    # Selector for routes (using route_short_name as requested)
     routes = sorted(r_df["route_short_name"].unique(), key=lambda x: str(x))
     selected_routes = st.multiselect("Select Routes to Compare", routes, default=routes[:3])
     
@@ -43,55 +43,52 @@ if not r_df.empty:
     
     fig_line = px.line(
         f_route, x="hour_vancouver", y="avg_delay_min", color="route_short_name",
-        markers=True, title="Evolution of Average Delay",
-        labels={"avg_delay_min": "Delay (min)", "hour_vancouver": "Time (Vancouver)"}
+        markers=True,
+        labels={"avg_delay_min": "Avg Delay (min)", "hour_vancouver": "Time"}
     )
     fig_line.update_xaxes(dtick=3600000, tickformat="%H:%M")
     st.plotly_chart(fig_line, use_container_width=True)
 
-# --- 2. CITY ANALYSIS & HEATMAP ---
+# --- 2. PERFORMANCE PAR QUARTIER (Vue: v_neighborhood_hourly_delay) ---
 st.markdown("---")
-st.subheader("🔥 Hourly Delay Intensity Heatmap")
+st.subheader("🏘️ Neighborhood Reliability Analysis")
 
-# Fetching from the city/area hourly view
-c_res = supabase.table("v_city_hourly_delay").select("*").execute()
-c_df = pd.DataFrame(c_res.data)
+# Fetch from your neighborhood view
+n_res = supabase.table("v_neighborhood_hourly_delay").select("*").execute()
+n_df = pd.DataFrame(n_res.data)
 
-if not c_df.empty:
-    c_df["hour_vancouver"] = pd.to_datetime(c_df["hour_vancouver"])
+if not n_df.empty:
+    n_df["hour_vancouver"] = pd.to_datetime(n_df["hour_vancouver"])
     
-    # Pivot data for the Heatmap
-    # We use area_name (Municipality) vs Time
-    heat_df = c_df.pivot(index="area_name", columns="hour_vancouver", values="avg_delay_min")
+    # We replace the heatmap with a faceted line chart or a clean comparison
+    neighborhoods = sorted(n_df["neighborhood"].unique())
+    selected_neigh = st.multiselect("Select Neighborhoods", neighborhoods, default=neighborhoods[:2])
     
-    fig_heat = px.imshow(
-        heat_df,
-        labels=dict(x="Time of Day", y="Municipality", color="Avg Delay (min)"),
-        x=heat_df.columns,
-        y=heat_df.index,
-        color_continuous_scale=color_scale, # USING YOUR SCALE
-        range_color=[-2, 10],
-        aspect="auto"
+    f_neigh = n_df[n_df["neighborhood"].isin(selected_neigh)]
+    
+    fig_neigh = px.area(
+        f_neigh, x="hour_vancouver", y="avg_delay_min", color="neighborhood",
+        line_group="neighborhood",
+        labels={"avg_delay_min": "Avg Delay (min)", "hour_vancouver": "Time"}
     )
-    fig_heat.update_xaxes(side="top", tickformat="%H:%M")
-    st.plotly_chart(fig_heat, use_container_width=True)
+    fig_neigh.update_xaxes(dtick=3600000, tickformat="%H:%M")
+    st.plotly_chart(fig_neigh, use_container_width=True)
 
-    # --- 3. COMPARATIVE BAR CHART (LONG TERM) ---
+    # --- 3. GLOBAL RANKING (Bar Chart with your colors) ---
     st.markdown("---")
-    st.subheader("🏙️ Cumulative City Performance")
+    st.subheader("🏆 Worst Performing Areas (Overall)")
     
-    # Total average per city across all time
-    city_perf = c_df.groupby("area_name")["avg_delay_min"].mean().sort_values()
+    # Aggregate data to show the most problematic areas over time
+    overall_neigh = n_df.groupby("neighborhood")["avg_delay_min"].mean().sort_values(ascending=True).tail(15)
     
-    fig_city_total = px.bar(
-        city_perf, orientation='h',
-        color=city_perf.values,
-        color_continuous_scale=color_scale, # USING YOUR SCALE
-        range_color=[-2, 8],
-        title="Overall Average Delay by Municipality (All Runs)"
+    fig_bar = px.bar(
+        overall_neigh, orientation='h',
+        color=overall_neigh.values,
+        color_continuous_scale=color_scale, # VOTRE ECHELLE
+        range_color=[-2, 8]
     )
-    fig_city_total.update_layout(coloraxis_showscale=False)
-    st.plotly_chart(fig_city_total, use_container_width=True)
+    fig_bar.update_layout(coloraxis_showscale=False, showlegend=False)
+    st.plotly_chart(fig_bar, use_container_width=True)
 
 else:
-    st.info("No historical data available yet. Keep the fetch script running to accumulate data.")
+    st.info("Historical views are empty. Ensure the aggregation script or views are correctly populated.")
