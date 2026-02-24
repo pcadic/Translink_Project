@@ -14,52 +14,59 @@ def init_connection():
 supabase = init_connection()
 
 # --- DATA LOADING ---
-@st.cache_data(ttl=0)
-def load_dashboard_data():
+@st.cache_data(ttl=60) # Cache for 1 minute to reflect new runs
+def load_latest_positions():
+    """Fetch only the most recent position for each active bus."""
     try:
-        response = supabase.rpc("get_all_bus_positions").execute()
+        # Assuming you created a view 'v_latest_bus_locations' in Supabase
+        response = supabase.table("v_latest_bus_locations").select("*").execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
             df["recorded_time"] = pd.to_datetime(df["recorded_time"])
-            if df["recorded_time"].dt.tz is None:
-                df["recorded_time"] = df["recorded_time"].dt.tz_localize("UTC")
-            df["recorded_time_local"] = df["recorded_time"].dt.tz_convert("America/Vancouver")
             df["delay_min"] = df["delay_seconds"] / 60
+            # Clean coordinates
             df = df[(df["latitude"] > 48.0) & (df["latitude"] < 50.0) & 
                     (df["longitude"] > -124.0) & (df["longitude"] < -122.0)]
             return df
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error loading real-time data: {e}")
     return pd.DataFrame()
 
 st.title("🚌 TransLink Real-Time Performance Dashboard")
-df = load_dashboard_data()
+
+# Load only the latest data for KPIs and Map
+df = load_latest_positions()
 
 if not df.empty:
-    # --- KPIs (English) ---
+    # --- KPIs (Now reflecting ONLY current active buses) ---
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Buses On-Grid", df["vehicle_no"].nunique())
+    c1.metric("Buses Currently Active", df["vehicle_no"].nunique())
     c2.metric("Punctuality", f"{(df['delay_min'].between(-1, 3)).mean() * 100:.1f}%")
     c3.metric("Avg Delay", f"{df['delay_min'].mean():.2f} min")
-    route_stats = df.groupby("route_no")["delay_min"].mean().sort_values(ascending=False)
+    
+    # Using route_short_name for the Slowest Route KPI
+    route_stats = df.groupby("route_short_name")["delay_min"].mean().sort_values(ascending=False)
     c4.metric("Slowest Route", f"Line {route_stats.idxmax()}" if not route_stats.empty else "N/A")
+    
     area_stats = df.groupby("area_name")["delay_min"].mean()
     c5.metric("Critical Zone", area_stats.idxmax() if not area_stats.empty else "N/A")
 
-    # --- FILTRE DE ROUTE (NOUVEAU) ---
+    # --- ROUTE FILTER (Updated to route_short_name) ---
     st.markdown("---")
-    # On trie les routes numériquement si possible pour le menu
-    available_routes = sorted(df["route_no"].unique(), key=lambda x: int(x) if str(x).isdigit() else 999)
+    # Sort numerically by route_short_name
+    available_routes = sorted(
+        df["route_short_name"].dropna().unique(), 
+        key=lambda x: int(x) if str(x).isdigit() else 999
+    )
     
-    # "All Routes" par défaut pour ne pas perdre l'utilisateur
-    selected_route = st.selectbox("🔍 Filter Map by Bus Route", ["All Routes"] + list(available_routes))
+    selected_route = st.selectbox("🔍 Filter Map by Bus Line (Short Name)", ["All Routes"] + list(available_routes))
 
-    # Application du filtre au DataFrame de la carte
+    # Filter application
     df_map = df.copy()
     if selected_route != "All Routes":
-        df_map = df[df["route_no"] == selected_route]
+        df_map = df[df["route_short_name"] == selected_route]
 
-    # --- ÉCHELLE DE COULEUR ---
+    # --- COLOR SCALE ---
     custom_scale = [
         [0.0, "#006400"], [0.25, "#00cc00"], [0.5, "#ffff00"], 
         [0.75, "#ff9900"], [1.0, "#cc0000"]
@@ -68,7 +75,8 @@ if not df.empty:
     # --- MAP ---
     fig_map = px.scatter_mapbox(
         df_map, lat="latitude", lon="longitude", color="delay_min",
-        hover_name="route_no", hover_data=["area_name", "delay_min"],
+        hover_name="route_short_name", # Updated hover name
+        hover_data=["route_long_name", "area_name", "delay_min"],
         zoom=10,
         mapbox_style="open-street-map",
         color_continuous_scale=custom_scale,
@@ -79,10 +87,9 @@ if not df.empty:
     fig_map.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=500)
     st.plotly_chart(fig_map, use_container_width=True)
 
-    # --- DISTRIBUTION DES DÉLAIS ---
+    # --- DELAY DISTRIBUTION ---
     st.markdown("---")
-    st.subheader("📊 Delay Distribution")
-    # On utilise aussi le DataFrame filtré pour que l'histogramme réagisse au filtre
+    st.subheader("📊 Current Delay Distribution")
     fig_hist = px.histogram(
         df_map, x="delay_min", nbins=50,
         labels={"delay_min": "Delay (minutes)"},
@@ -91,6 +98,8 @@ if not df.empty:
     )
     fig_hist.update_layout(xaxis_title="Delay (min)", yaxis_title="Number of Buses", bargap=0.1)
     st.plotly_chart(fig_hist, use_container_width=True)
+
+    # ... Rest of charts (City, Neighborhood, Trends) remain consistent with filtered data
 
     # ... Le reste du code (Bar charts, Trends, Heatmap) reste identique
 
