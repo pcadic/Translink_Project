@@ -112,7 +112,7 @@ if not df.empty:
 
     # --- HISTOGRAMME (Format original) ---
     st.subheader("Delay Distribution")
-    fig_hist = px.histogram(df_map, x="delay_min", nbins=50, color_discrete_sequence=["green"])
+    fig_hist = px.histogram(df_map, x="delay_min", nbins=50, color_discrete_sequence=["blue"])
     st.plotly_chart(fig_hist, use_container_width=True)
 
 else:
