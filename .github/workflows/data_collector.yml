@@ -2,7 +2,7 @@ name: Bus Data Pipeline
 
 on:
    schedule:
-    - cron: '0 6 * * *' # Every 30 minutes
+    - cron: '0 6 * * *' 
   workflow_dispatch:      # Manual trigger
 
 jobs:
