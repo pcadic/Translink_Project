@@ -32,12 +32,19 @@ df_global = pd.DataFrame(res_global.data)
 
 if not df_global.empty:
     df_global["hour_vancouver"] = pd.to_datetime(df_global["hour_vancouver"])
+    # Tri par heure pour que l'axe X soit dans l'ordre chronologique
+    df_global = df_global.sort_values(by="hour_vancouver")
+    # Extraction de l'heure formatée
+    df_global["display_hour"] = df_global["hour_vancouver"].dt.strftime('%H:00')
+
     fig_global = px.area(
-        df_global, x="hour_vancouver", y="avg_delay_min",
-        title="Average System-Wide Delay",
-        labels={"avg_delay_min": "Delay (min)", "hour_vancouver": "Time"},
+        df_global, x="display_hour", y="avg_delay_min",
+        title="Average System-Wide Delay by Hour",
+        labels={"avg_delay_min": "Delay (min)", "display_hour": "Hour of Day"},
         color_discrete_sequence=["#3366CC"]
     )
+    # On force l'ordre des catégories pour éviter que Plotly ne les mélange
+    fig_global.update_xaxes(categoryorder='category ascending')
     st.plotly_chart(fig_global, use_container_width=True)
 
 # --- 2. TENDANCE PAR LIGNE (Vue: v_route_hourly_delay) ---
