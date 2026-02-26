@@ -55,14 +55,19 @@ df_route = pd.DataFrame(res_route.data)
 
 if not df_route.empty:
     df_route["hour_vancouver"] = pd.to_datetime(df_route["hour_vancouver"])
+    df_route = df_route.sort_values(by="hour_vancouver")
+    df_route["display_hour"] = df_route["hour_vancouver"].dt.strftime('%H:00')
+    
     routes = sorted(df_route["route_short_name"].unique(), key=lambda x: str(x))
     selected_routes = st.multiselect("Select Routes to Compare", routes, default=routes[:3])
     
     f_route = df_route[df_route["route_short_name"].isin(selected_routes)]
+    
     fig_line = px.line(
-        f_route, x="hour_vancouver", y="avg_delay_min", color="route_short_name",
-        markers=True, title="Hourly Delay by Route"
+        f_route, x="display_hour", y="avg_delay_min", color="route_short_name",
+        markers=True, title="Hourly Delay by Route (Daily Cycle)"
     )
+    fig_line.update_xaxes(categoryorder='category ascending')
     st.plotly_chart(fig_line, use_container_width=True)
 
 # --- 3. ANALYSE PAR VILLE ET QUARTIER (Vues: v_city_hourly_delay & v_neighborhood_hourly_delay) ---
