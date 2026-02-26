@@ -96,12 +96,18 @@ with col_neigh:
     st.subheader("🏘️ Neighborhood Trends")
     res_neigh = supabase.table("v_neighborhood_hourly_delay").select("*").execute()
     df_neigh = pd.DataFrame(res_neigh.data)
+
     if not df_neigh.empty:
-        df_neigh["hour_vancouver"] = pd.to_datetime(df_neigh["hour_vancouver"])
+        df_neigh["hour_vancouver"] = pd.to_datetime(df_city["hour_vancouver"])
+        df_neigh = df_neigh.sort_values(by="hour_vancouver")
+        df_neigh["display_hour"] = df_neigh["hour_vancouver"].dt.strftime('%H:00')
+        
         neighs = sorted(df_neigh["area_name"].unique())
-        sel_neighs = st.multiselect("Select Neighborhoods", neighs, default=neighs[:2])
+        sel_neighs = st.multiselect("Select Cities", neighs, default=neighs[:2])
         f_neigh = df_neigh[df_neigh["area_name"].isin(sel_neighs)]
-        fig_neigh = px.line(f_neigh, x="hour_vancouver", y="avg_delay_min", color="area_name", markers=True)
+        
+        fig_neigh = px.line(f_neigh, x="display_hour", y="avg_delay_min", color="area_name", markers=True)
+        fig_neigh.update_xaxes(categoryorder='category ascending')
         st.plotly_chart(fig_neigh, use_container_width=True)
 
 # --- 4. CUMULATIVE RANKING (Worst Areas) ---
