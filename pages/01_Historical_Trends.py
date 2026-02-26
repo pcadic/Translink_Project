@@ -78,12 +78,18 @@ with col_city:
     st.subheader("🏙️ City Trends")
     res_city = supabase.table("v_city_hourly_delay").select("*").execute()
     df_city = pd.DataFrame(res_city.data)
+
     if not df_city.empty:
         df_city["hour_vancouver"] = pd.to_datetime(df_city["hour_vancouver"])
+        df_city = df_city.sort_values(by="hour_vancouver")
+        df_city["display_hour"] = df_city["hour_vancouver"].dt.strftime('%H:00')
+        
         cities = sorted(df_city["area_name"].unique())
         sel_cities = st.multiselect("Select Cities", cities, default=cities[:2])
         f_city = df_city[df_city["area_name"].isin(sel_cities)]
-        fig_city = px.line(f_city, x="hour_vancouver", y="avg_delay_min", color="area_name", markers=True)
+        
+        fig_city = px.line(f_city, x="display_hour", y="avg_delay_min", color="area_name", markers=True)
+        fig_city.update_xaxes(categoryorder='category ascending')
         st.plotly_chart(fig_city, use_container_width=True)
 
 with col_neigh:
