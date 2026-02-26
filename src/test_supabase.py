@@ -10,7 +10,7 @@ sys.stdout.flush()
 
 # Vérification des variables d'environnement
 url = os.environ.get('SUPABASE_URL')
-key = os.environ.get('SUPABASE_KEY')
+key = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
 
 if not url or not key:
     print("ERREUR: Variables d'environnement manquantes !")
