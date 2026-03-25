@@ -1,8 +1,8 @@
 name: Bus Data Pipeline
 
 on:
-  schedule:
-    - cron: '0 12 * * *'
+  #schedule:
+   # - cron: '0 12 * * *'
   workflow_dispatch:
 
 # Cette variable force l'utilisation de Node 24 pour toutes les étapes du workflow
