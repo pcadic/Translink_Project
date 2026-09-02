@@ -101,10 +101,10 @@ if not df_all.empty:
         stats["area_name_upper"] = stats["area_name"].str.upper().str.strip()
         map_df = geojson_data.merge(stats, left_on="name_upper", right_on="area_name_upper")
 
-        fig_map = px.choropleth_mapbox(
+        fig_map = px.choropleth_map(
             map_df, geojson=map_df.__geo_interface__, locations=map_df.index,
             color="cluster", hover_name="name",
-            mapbox_style="carto-positron",
+            map_style="carto-positron",
             center={"lat": 49.25, "lon": -123.12}, zoom=9, opacity=0.7,
             color_discrete_sequence=px.colors.qualitative.Safe
         )
