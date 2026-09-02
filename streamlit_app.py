@@ -82,6 +82,7 @@ if not df.empty:
         map_style="open-street-map"
     )
     fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
+    fig_map.update_geos(fitbounds="locations")
     st.plotly_chart(fig_map, use_container_width=True)
 
     # --- ANALYSE GEOGRAPHIQUE (Format exact de votre original) ---
