@@ -71,13 +71,13 @@ if not df.empty:
     df_map = df if sel_route == "All Routes" else df[df["route_short_name"] == sel_route]
 
     # Application de VOTRE color_scale sur la carte
-    fig_map = px.scatter_mapbox(
+    fig_map = px.scatter_map(
         df_map, lat="latitude", lon="longitude", color="delay_min",
         hover_name="route_short_name", 
         hover_data=["route_long_name", "delay_min"],
         color_continuous_scale=color_scale,
         range_color=[-2, 10], # Centre le jaune à 0
-        zoom=10, mapbox_style="open-street-map"
+        zoom=10, map_style="open-street-map"
     )
     fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=500)
     st.plotly_chart(fig_map, use_container_width=True)
